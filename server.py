@@ -1,14 +1,16 @@
 import asyncio
+import http
 import json
 import math
 import os
 import random
+import time
 import websockets
 
 WIDTH = 500
 HEIGHT = 500
 
-VERSION_TITLE = "무수직반사_스코어버전8 (Angle Forced & Score System)"
+VERSION_TITLE = "무수직반사_스코어버전9 (Hot-Join & 2s Delay)"
 
 SLOTS = {"bottom": None, "left": None, "right": None}
 PLAYER_NAMES = {"bottom": "BOT", "left": "BOT", "right": "BOT"}
@@ -16,6 +18,7 @@ SCORES = {"bottom": 0, "left": 0, "right": 0}
 CONNECTED_CLIENTS = {}
 
 game_started = False
+pause_until = 0.0  # 일시정지 딜레이 타임스탬프
 current_stage = 1
 TOTAL_STAGES = 3
 last_hitter = None
@@ -131,134 +134,139 @@ def enforce_non_vertical(vx, vy, base_dir="y"):
     return vx * scale, vy * scale
 
 async def game_loop():
-    global game_started, current_stage, bricks, ball, last_hitter
+    global game_started, current_stage, bricks, ball, last_hitter, pause_until
     P_LEN = 70
 
     while True:
+        now = time.time()
+        is_paused = (now < pause_until)
+
         if game_started:
-            update_ai()
+            if not is_paused:
+                update_ai()
 
-            sub_steps = 4
-            step_vx = ball["vx"] / sub_steps
-            step_vy = ball["vy"] / sub_steps
+                sub_steps = 4
+                step_vx = ball["vx"] / sub_steps
+                step_vy = ball["vy"] / sub_steps
 
-            for _ in range(sub_steps):
-                ball["x"] += step_vx
-                ball["y"] += step_vy
+                for _ in range(sub_steps):
+                    ball["x"] += step_vx
+                    ball["y"] += step_vy
 
-                # 1. 상단 천장 반사
-                if ball["y"] - ball["radius"] <= 10:
-                    ball["y"] = 10 + ball["radius"]
-                    ball["vy"] = abs(ball["vy"])
-                    ball["vx"], ball["vy"] = enforce_non_vertical(ball["vx"], ball["vy"], "y")
-                    step_vx = ball["vx"] / sub_steps
-                    step_vy = ball["vy"] / sub_steps
-
-                # 2. 하단 패들 충돌
-                if ball["y"] + ball["radius"] >= HEIGHT - 22:
-                    pad_x = paddle_positions["bottom"]
-                    if pad_x - P_LEN / 2 <= ball["x"] <= pad_x + P_LEN / 2:
-                        ball["y"] = HEIGHT - 22 - ball["radius"]
-                        offset = (ball["x"] - pad_x) / (P_LEN / 2)
-                        if abs(offset) < 0.22:
-                            offset = 0.35 if offset >= 0 else -0.35
-
-                        rebound_angle = offset * (math.pi / 2.8)
-                        ball["vx"] = BALL_BASE_SPEED * math.sin(rebound_angle)
-                        ball["vy"] = -BALL_BASE_SPEED * math.cos(rebound_angle)
+                    # 1. 천장
+                    if ball["y"] - ball["radius"] <= 10:
+                        ball["y"] = 10 + ball["radius"]
+                        ball["vy"] = abs(ball["vy"])
                         ball["vx"], ball["vy"] = enforce_non_vertical(ball["vx"], ball["vy"], "y")
                         step_vx = ball["vx"] / sub_steps
                         step_vy = ball["vy"] / sub_steps
-                        last_hitter = "bottom"
-                    elif ball["y"] > HEIGHT + 30:
-                        SCORES["bottom"] = max(0, SCORES["bottom"] - 200)
-                        reset_ball()
-                        break
 
-                # 3. 좌측 패들 충돌
-                if ball["x"] - ball["radius"] <= 22:
-                    pad_y = paddle_positions["left"]
-                    if pad_y - P_LEN / 2 <= ball["y"] <= pad_y + P_LEN / 2:
-                        ball["x"] = 22 + ball["radius"]
-                        offset = (ball["y"] - pad_y) / (P_LEN / 2)
-                        if abs(offset) < 0.22:
-                            offset = -0.35
+                    # 2. 하단 패들
+                    if ball["y"] + ball["radius"] >= HEIGHT - 22:
+                        pad_x = paddle_positions["bottom"]
+                        if pad_x - P_LEN / 2 <= ball["x"] <= pad_x + P_LEN / 2:
+                            ball["y"] = HEIGHT - 22 - ball["radius"]
+                            offset = (ball["x"] - pad_x) / (P_LEN / 2)
+                            if abs(offset) < 0.22:
+                                offset = 0.35 if offset >= 0 else -0.35
 
-                        adj_offset = max(-1.0, min(1.0, offset - 0.2))
-                        rebound_angle = adj_offset * (math.pi / 2.9)
-                        ball["vx"] = BALL_BASE_SPEED * math.cos(rebound_angle)
-                        ball["vy"] = BALL_BASE_SPEED * math.sin(rebound_angle)
-                        ball["vx"], ball["vy"] = enforce_non_vertical(ball["vx"], ball["vy"], "x")
-                        step_vx = ball["vx"] / sub_steps
-                        step_vy = ball["vy"] / sub_steps
-                        last_hitter = "left"
-                    elif ball["x"] < -30:
-                        SCORES["left"] = max(0, SCORES["left"] - 200)
-                        reset_ball()
-                        break
+                            rebound_angle = offset * (math.pi / 2.8)
+                            ball["vx"] = BALL_BASE_SPEED * math.sin(rebound_angle)
+                            ball["vy"] = -BALL_BASE_SPEED * math.cos(rebound_angle)
+                            ball["vx"], ball["vy"] = enforce_non_vertical(ball["vx"], ball["vy"], "y")
+                            step_vx = ball["vx"] / sub_steps
+                            step_vy = ball["vy"] / sub_steps
+                            last_hitter = "bottom"
+                        elif ball["y"] > HEIGHT + 30:
+                            SCORES["bottom"] = max(0, SCORES["bottom"] - 200)
+                            reset_ball()
+                            break
 
-                # 4. 우측 패들 충돌
-                if ball["x"] + ball["radius"] >= WIDTH - 22:
-                    pad_y = paddle_positions["right"]
-                    if pad_y - P_LEN / 2 <= ball["y"] <= pad_y + P_LEN / 2:
-                        ball["x"] = WIDTH - 22 - ball["radius"]
-                        offset = (ball["y"] - pad_y) / (P_LEN / 2)
-                        if abs(offset) < 0.22:
-                            offset = -0.35
+                    # 3. 좌측 패들
+                    if ball["x"] - ball["radius"] <= 22:
+                        pad_y = paddle_positions["left"]
+                        if pad_y - P_LEN / 2 <= ball["y"] <= pad_y + P_LEN / 2:
+                            ball["x"] = 22 + ball["radius"]
+                            offset = (ball["y"] - pad_y) / (P_LEN / 2)
+                            if abs(offset) < 0.22:
+                                offset = -0.35
 
-                        adj_offset = max(-1.0, min(1.0, offset - 0.2))
-                        rebound_angle = adj_offset * (math.pi / 2.9)
-                        ball["vx"] = -BALL_BASE_SPEED * math.cos(rebound_angle)
-                        ball["vy"] = BALL_BASE_SPEED * math.sin(rebound_angle)
-                        ball["vx"], ball["vy"] = enforce_non_vertical(ball["vx"], ball["vy"], "x")
-                        step_vx = ball["vx"] / sub_steps
-                        step_vy = ball["vy"] / sub_steps
-                        last_hitter = "right"
-                    elif ball["x"] > WIDTH + 30:
-                        SCORES["right"] = max(0, SCORES["right"] - 200)
-                        reset_ball()
-                        break
+                            adj_offset = max(-1.0, min(1.0, offset - 0.2))
+                            rebound_angle = adj_offset * (math.pi / 2.9)
+                            ball["vx"] = BALL_BASE_SPEED * math.cos(rebound_angle)
+                            ball["vy"] = BALL_BASE_SPEED * math.sin(rebound_angle)
+                            ball["vx"], ball["vy"] = enforce_non_vertical(ball["vx"], ball["vy"], "x")
+                            step_vx = ball["vx"] / sub_steps
+                            step_vy = ball["vy"] / sub_steps
+                            last_hitter = "left"
+                        elif ball["x"] < -30:
+                            SCORES["left"] = max(0, SCORES["left"] - 200)
+                            reset_ball()
+                            break
 
-                # 5. 벽돌 충돌 및 점수
-                r = ball["radius"]
-                for b in bricks:
-                    if not b["alive"]:
-                        continue
+                    # 4. 우측 패들
+                    if ball["x"] + ball["radius"] >= WIDTH - 22:
+                        pad_y = paddle_positions["right"]
+                        if pad_y - P_LEN / 2 <= ball["y"] <= pad_y + P_LEN / 2:
+                            ball["x"] = WIDTH - 22 - ball["radius"]
+                            offset = (ball["y"] - pad_y) / (P_LEN / 2)
+                            if abs(offset) < 0.22:
+                                offset = -0.35
 
-                    closest_x = max(b["x"], min(ball["x"], b["x"] + b["w"]))
-                    closest_y = max(b["y"], min(ball["y"], b["y"] + b["h"]))
+                            adj_offset = max(-1.0, min(1.0, offset - 0.2))
+                            rebound_angle = adj_offset * (math.pi / 2.9)
+                            ball["vx"] = -BALL_BASE_SPEED * math.cos(rebound_angle)
+                            ball["vy"] = BALL_BASE_SPEED * math.sin(rebound_angle)
+                            ball["vx"], ball["vy"] = enforce_non_vertical(ball["vx"], ball["vy"], "x")
+                            step_vx = ball["vx"] / sub_steps
+                            step_vy = ball["vy"] / sub_steps
+                            last_hitter = "right"
+                        elif ball["x"] > WIDTH + 30:
+                            SCORES["right"] = max(0, SCORES["right"] - 200)
+                            reset_ball()
+                            break
 
-                    dist_x = ball["x"] - closest_x
-                    dist_y = ball["y"] - closest_y
+                    # 5. 벽돌 충돌
+                    r = ball["radius"]
+                    for b in bricks:
+                        if not b["alive"]:
+                            continue
 
-                    if (dist_x * dist_x + dist_y * dist_y) < (r * r):
-                        b["alive"] = False
-                        if last_hitter in SCORES:
-                            SCORES[last_hitter] += 100
+                        closest_x = max(b["x"], min(ball["x"], b["x"] + b["w"]))
+                        closest_y = max(b["y"], min(ball["y"], b["y"] + b["h"]))
 
-                        overlap_left = (ball["x"] + r) - b["x"]
-                        overlap_right = (b["x"] + b["w"]) - (ball["x"] - r)
-                        overlap_top = (ball["y"] + r) - b["y"]
-                        overlap_bottom = (b["y"] + b["h"]) - (ball["y"] - r)
+                        dist_x = ball["x"] - closest_x
+                        dist_y = ball["y"] - closest_y
 
-                        if min(overlap_left, overlap_right) < min(overlap_top, overlap_bottom):
-                            ball["vx"] = -ball["vx"]
-                            step_vx = -step_vx
-                            ball["x"] = b["x"] - r - 0.5 if overlap_left < overlap_right else b["x"] + b["w"] + r + 0.5
-                        else:
-                            ball["vy"] = -ball["vy"]
-                            step_vy = -step_vy
-                            ball["y"] = b["y"] - r - 0.5 if overlap_top < overlap_bottom else b["y"] + b["h"] + r + 0.5
-                        break
+                        if (dist_x * dist_x + dist_y * dist_y) < (r * r):
+                            b["alive"] = False
+                            if last_hitter in SCORES:
+                                SCORES[last_hitter] += 100
 
-            # 스테이지 클리어
-            if sum(1 for b in bricks if b["alive"]) == 0:
-                current_stage = (current_stage % TOTAL_STAGES) + 1
-                bricks = generate_stage(current_stage)
-                reset_ball()
+                            overlap_left = (ball["x"] + r) - b["x"]
+                            overlap_right = (b["x"] + b["w"]) - (ball["x"] - r)
+                            overlap_top = (ball["y"] + r) - b["y"]
+                            overlap_bottom = (b["y"] + b["h"]) - (ball["y"] - r)
+
+                            if min(overlap_left, overlap_right) < min(overlap_top, overlap_bottom):
+                                ball["vx"] = -ball["vx"]
+                                step_vx = -step_vx
+                                ball["x"] = b["x"] - r - 0.5 if overlap_left < overlap_right else b["x"] + b["w"] + r + 0.5
+                            else:
+                                ball["vy"] = -ball["vy"]
+                                step_vy = -step_vy
+                                ball["y"] = b["y"] - r - 0.5 if overlap_top < overlap_bottom else b["y"] + b["h"] + r + 0.5
+                            break
+
+                if sum(1 for b in bricks if b["alive"]) == 0:
+                    current_stage = (current_stage % TOTAL_STAGES) + 1
+                    bricks = generate_stage(current_stage)
+                    reset_ball()
+                    pause_until = time.time() + 2.0  # 다음 스테이지도 2초 준비
 
             bot_list = [role for role, ws in SLOTS.items() if ws is None]
             waiting_users = [info["name"] for ws, info in CONNECTED_CLIENTS.items() if info.get("state") == "waiting"]
+            remaining_pause = max(0.0, pause_until - now)
 
             payload = json.dumps({
                 "type": "game_update",
@@ -269,7 +277,8 @@ async def game_loop():
                 "bot_slots": bot_list,
                 "stage": current_stage,
                 "waiting_users": waiting_users,
-                "bricks": [b["id"] for b in bricks if not b["alive"]]
+                "bricks": [b["id"] for b in bricks if not b["alive"]],
+                "pause_sec": remaining_pause
             })
             for ws in list(CONNECTED_CLIENTS.keys()):
                 try:
@@ -280,18 +289,44 @@ async def game_loop():
         await asyncio.sleep(0.016)
 
 async def handler(websocket):
-    # [핵심 수정] 전역 변수를 함수 최상단에 선언하여 UnboundLocalError 원천 차단
-    global game_started, current_stage, bricks, SCORES
+    global game_started, current_stage, bricks, SCORES, pause_until
 
-    state = "waiting" if game_started else "lobby"
-    CONNECTED_CLIENTS[websocket] = {"role": None, "name": f"게스트{random.randint(100, 999)}", "state": state}
+    # 기본 게스트 세팅
+    new_user_name = f"플레이어{random.randint(100, 999)}"
+    assigned_role = None
 
+    # [핵심 로직] 이미 게임이 진행 중일 때 접속한 경우 (핫조인)
     if game_started:
-        await websocket.send(json.dumps({
-            "type": "waiting_room_notice",
-            "bricks": bricks,
-            "stage": current_stage
-        }))
+        # 비어있는(BOT) 자리가 있는지 탐색
+        empty_slots = [r for r in ["bottom", "left", "right"] if SLOTS[r] is None]
+        if empty_slots:
+            assigned_role = empty_slots[0]
+            SLOTS[assigned_role] = websocket
+            PLAYER_NAMES[assigned_role] = new_user_name
+            CONNECTED_CLIENTS[websocket] = {"role": assigned_role, "name": new_user_name, "state": "playing"}
+            
+            # 모든 참여자 2초 일시정지 부여
+            pause_until = time.time() + 2.0
+
+            # 신규 접속자에게 현재 게임 상태 동기화 및 즉시 시작 통보
+            await websocket.send(json.dumps({
+                "type": "game_start",
+                "stage": current_stage,
+                "bricks": bricks,
+                "assigned_role": assigned_role
+            }))
+        else:
+            # 자리가 없으면 관전 대기실로
+            CONNECTED_CLIENTS[websocket] = {"role": None, "name": new_user_name, "state": "waiting"}
+            await websocket.send(json.dumps({
+                "type": "waiting_room_notice",
+                "bricks": bricks,
+                "stage": current_stage
+            }))
+    else:
+        # 게임 시작 전 로비 상태
+        CONNECTED_CLIENTS[websocket] = {"role": None, "name": new_user_name, "state": "lobby"}
+
     await broadcast_lobby()
 
     try:
@@ -329,6 +364,8 @@ async def handler(websocket):
                     bricks = generate_stage(current_stage)
                     reset_ball()
                     game_started = True
+                    pause_until = time.time() + 2.0  # 게임 시작 시 2초 딜레이
+                    
                     for ws in CONNECTED_CLIENTS:
                         CONNECTED_CLIENTS[ws]["state"] = "playing" if CONNECTED_CLIENTS[ws]["role"] else "waiting"
 
@@ -367,9 +404,19 @@ async def handler(websocket):
             game_started = False
         await broadcast_lobby()
 
+async def health_check_handler(path, request_headers):
+    if request_headers.get("Upgrade", "").lower() != "websocket":
+        return http.HTTPStatus.OK, [("Content-Type", "text/plain")], b"Server Live OK\n"
+    return None
+
 async def main():
     port = int(os.environ.get("PORT", 8765))
-    server = await websockets.serve(handler, "0.0.0.0", port)
+    server = await websockets.serve(
+        handler,
+        "0.0.0.0",
+        port,
+        process_request=health_check_handler
+    )
     print(f"[{VERSION_TITLE}] 서버 가동 시작... 포트: {port}")
     await asyncio.gather(server.wait_closed(), game_loop())
 
