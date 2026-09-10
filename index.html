@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>3인 멀티 알카노이드 (빵패들 & 사운드)</title>
+  <title>3인 멀티 알카노이드 (정밀 반사 & 스코어)</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -24,17 +24,8 @@
       font-size: 13px;
       color: #00ffcc;
       font-weight: bold;
-      margin-bottom: 4px;
-      letter-spacing: 0.5px;
-    }
-    #netStatus {
-      font-size: 11px;
-      padding: 2px 8px;
-      border-radius: 10px;
-      background: #2a2010;
-      color: #ffaa00;
       margin-bottom: 6px;
-      font-weight: bold;
+      letter-spacing: 0.5px;
     }
     #scoreboard {
       display: flex;
@@ -86,7 +77,7 @@
       display: block;
       aspect-ratio: 1 / 1;
     }
-
+    
     .overlay {
       position: absolute;
       top: 0; left: 0; width: 100%; height: 100%;
@@ -99,7 +90,7 @@
       padding: 16px;
     }
     h2 { margin: 0 0 12px 0; color: #fff; font-size: 18px; }
-
+    
     .name-box {
       display: flex;
       gap: 6px;
@@ -125,7 +116,7 @@
       font-weight: bold;
       font-size: 12px;
     }
-
+    
     .role-grid { display: flex; flex-direction: column; gap: 8px; width: 86%; margin-bottom: 14px; }
     .role-btn {
       padding: 11px 14px;
@@ -162,30 +153,6 @@
       display: none;
       z-index: 5;
     }
-
-    #countdownOverlay {
-      display: none;
-      position: absolute;
-      top: 0; left: 0; width: 100%; height: 100%;
-      background: rgba(0, 0, 0, 0.45);
-      z-index: 20;
-      align-items: center;
-      justify-content: center;
-      flex-direction: column;
-    }
-    #countdownNumber {
-      font-size: 75px;
-      font-weight: 900;
-      color: #00ffcc;
-      text-shadow: 0 0 20px #00ffcc;
-      animation: pop 0.8s ease-out;
-    }
-    @keyframes pop {
-      0% { transform: scale(0.5); opacity: 0; }
-      50% { transform: scale(1.2); opacity: 1; }
-      100% { transform: scale(1.0); }
-    }
-
     #waitingOverlay { display: none; }
     .waiting-spinner {
       width: 38px;
@@ -200,8 +167,7 @@
   </style>
 </head>
 <body>
-  <div id="versionTitle">소켓연결완료_확정버전9.3 (Fix Async Race & Status)</div>
-  <div id="netStatus">🟡 서버 신호 연결 중...</div>
+  <div id="versionTitle">무수직반사_스코어버전8 (Angle Forced & Score System)</div>
 
   <div id="scoreboard">
     <div class="score-item left" id="score-left">L(좌): 0</div>
@@ -210,14 +176,10 @@
   </div>
 
   <div id="waitingNoticeBanner">🔔 대기실에 참가자가 있습니다!</div>
-
+  
   <div id="container">
     <div id="stageBadge">STAGE 1 / 3</div>
     <canvas id="game" width="500" height="500"></canvas>
-
-    <div id="countdownOverlay">
-      <div id="countdownNumber">2</div>
-    </div>
 
     <div id="lobbyOverlay" class="overlay">
       <h2>포지션 선택 및 참가</h2>
@@ -241,9 +203,9 @@
 
     <div id="waitingOverlay" class="overlay">
       <div class="waiting-spinner"></div>
-      <h2 style="color:#ffcc00; margin-bottom:8px;">게임이 진행 중입니다</h2>
+      <h2 style="color:#ffcc00; margin-bottom:8px;">게임이 이미 진행 중입니다</h2>
       <p style="font-size:13px; color:#aaa; text-align:center; line-height:1.5; margin:0 0 16px 0;">
-        현재 라운드가 진행 중입니다.<br>
+        현재 대결 중인 라운드가 진행 중입니다.<br>
         <strong>[대기실]</strong>에서 관전하며 대기해 주세요.<br>
         다음 라운드 시작 시 즉시 참여할 수 있습니다!
       </p>
@@ -258,11 +220,8 @@
     const canvas = document.getElementById("game");
     const ctx = canvas.getContext("2d");
     const versionTitle = document.getElementById("versionTitle");
-    const netStatus = document.getElementById("netStatus");
     const lobbyOverlay = document.getElementById("lobbyOverlay");
     const waitingOverlay = document.getElementById("waitingOverlay");
-    const countdownOverlay = document.getElementById("countdownOverlay");
-    const countdownNumber = document.getElementById("countdownNumber");
     const waitingNoticeBanner = document.getElementById("waitingNoticeBanner");
     const stageBadge = document.getElementById("stageBadge");
     const nameInput = document.getElementById("nameInput");
@@ -272,66 +231,9 @@
     const scoreBottom = document.getElementById("score-bottom");
     const scoreRight = document.getElementById("score-right");
 
-    const AudioContext = window.AudioContext || window.webkitAudioContext;
-    let audioCtx = null;
-
-    function initAudio() {
-      if (!audioCtx) audioCtx = new AudioContext();
-      if (audioCtx.state === 'suspended') audioCtx.resume();
-    }
-
-    function playSound(type) {
-      if (!audioCtx) return;
-      const osc = audioCtx.createOscillator();
-      const gain = audioCtx.createGain();
-      osc.connect(gain);
-      gain.connect(audioCtx.destination);
-      const now = audioCtx.currentTime;
-
-      if (type === "brick") {
-        osc.type = "triangle";
-        osc.frequency.setValueAtTime(880, now);
-        osc.frequency.exponentialRampToValueAtTime(1320, now + 0.08);
-        gain.gain.setValueAtTime(0.3, now);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.08);
-        osc.start(now);
-        osc.stop(now + 0.08);
-      } else if (type === "paddle") {
-        osc.type = "sine";
-        osc.frequency.setValueAtTime(480, now);
-        osc.frequency.exponentialRampToValueAtTime(320, now + 0.1);
-        gain.gain.setValueAtTime(0.35, now);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
-        osc.start(now);
-        osc.stop(now + 0.1);
-      } else if (type === "miss") {
-        osc.type = "sawtooth";
-        osc.frequency.setValueAtTime(160, now);
-        osc.frequency.exponentialRampToValueAtTime(60, now + 0.3);
-        gain.gain.setValueAtTime(0.3, now);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
-        osc.start(now);
-        osc.stop(now + 0.3);
-      } else if (type === "beep") {
-        osc.type = "sine";
-        osc.frequency.setValueAtTime(600, now);
-        gain.gain.setValueAtTime(0.2, now);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
-        osc.start(now);
-        osc.stop(now + 0.15);
-      } else if (type === "start") {
-        osc.type = "sine";
-        osc.frequency.setValueAtTime(1000, now);
-        gain.gain.setValueAtTime(0.3, now);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.35);
-        osc.start(now);
-        osc.stop(now + 0.35);
-      }
-    }
-
     const WS_URL = "wss://arkanoid-3p-multi.onrender.com";
     let ws = null;
-    let myRole = "bottom"; // 기본값을 하단으로 예약 지정
+    let myRole = null;
     let myName = "플레이어" + Math.floor(Math.random() * 900 + 100);
     nameInput.value = myName;
 
@@ -352,20 +254,10 @@
     }
 
     function connectSocket() {
-      netStatus.innerText = "🟡 서버 신호 연결 중...";
-      netStatus.style.background = "#2a2010";
-      netStatus.style.color = "#ffaa00";
-
       ws = new WebSocket(WS_URL);
 
       ws.onopen = () => {
-        netStatus.innerText = "🟢 서버 연결 완료 (온라인)";
-        netStatus.style.background = "#0f3636";
-        netStatus.style.color = "#00ffcc";
-
-        // 접속 즉시 이름과 기본 자리 등록
         ws.send(JSON.stringify({ type: "set_name", name: myName }));
-        ws.send(JSON.stringify({ type: "select_role", role: myRole }));
       };
 
       ws.onmessage = (e) => {
@@ -373,7 +265,6 @@
 
         if (msg.type === "lobby_state") {
           versionTitle.innerText = `[ ${msg.title} ]`;
-          if (msg.names) playerNames = msg.names;
           updateLobbyUI(msg.slots);
           if (msg.scores) updateScoreboard(msg.scores, playerNames);
 
@@ -383,37 +274,23 @@
           } else {
             waitingNoticeBanner.style.display = "none";
           }
-        }
+        } 
         else if (msg.type === "waiting_room_notice") {
           lobbyOverlay.style.display = "none";
           waitingOverlay.style.display = "flex";
           stageBadge.style.display = "block";
           stageBadge.innerText = `STAGE ${msg.stage} / 3 (관전 대기 중)`;
-          if (msg.names) playerNames = msg.names;
           bricks = msg.bricks;
-        }
-        else if (msg.type === "countdown") {
-          lobbyOverlay.style.display = "none";
-          waitingOverlay.style.display = "none";
-          countdownOverlay.style.display = "flex";
-          countdownNumber.innerText = msg.count;
-          playSound("beep");
-          if (msg.names) playerNames = msg.names;
-          bricks = msg.bricks;
-          deadBrickIds.clear();
-        }
+        } 
         else if (msg.type === "game_start") {
-          countdownNumber.innerText = "START!";
-          playSound("start");
-          setTimeout(() => {
-            countdownOverlay.style.display = "none";
-          }, 500);
-
+          if (myRole) {
+            lobbyOverlay.style.display = "none";
+            waitingOverlay.style.display = "none";
+          }
           stageBadge.style.display = "block";
-          if (msg.names) playerNames = msg.names;
           bricks = msg.bricks;
           deadBrickIds.clear();
-        }
+        } 
         else if (msg.type === "game_update") {
           ball = msg.ball;
           for (let r of ["bottom", "left", "right"]) {
@@ -421,12 +298,11 @@
               paddles[r] = msg.paddles[r];
             }
           }
-          if (msg.names) playerNames = msg.names;
+          playerNames = msg.names || playerNames;
           botSlots = msg.bot_slots || [];
           stageBadge.innerText = `STAGE ${msg.stage} / 3`;
           msg.bricks.forEach(id => deadBrickIds.add(id));
 
-          if (msg.sound) playSound(msg.sound);
           if (msg.scores) updateScoreboard(msg.scores, playerNames);
 
           if (msg.waiting_users && msg.waiting_users.length > 0 && myRole) {
@@ -440,9 +316,6 @@
       };
 
       ws.onclose = () => {
-        netStatus.innerText = "🔴 서버 연결 끊김 (3초 후 재접속)";
-        netStatus.style.background = "#3a1010";
-        netStatus.style.color = "#ff4444";
         setTimeout(connectSocket, 3000);
       };
     }
@@ -450,7 +323,6 @@
     connectSocket();
 
     function changeName() {
-      initAudio();
       if (!nameInput.value.trim()) return;
       myName = nameInput.value.trim();
       if (ws && ws.readyState === WebSocket.OPEN) {
@@ -459,7 +331,6 @@
     }
 
     function changeWaitingName() {
-      initAudio();
       if (!waitingNameInput.value.trim()) return;
       myName = waitingNameInput.value.trim();
       if (ws && ws.readyState === WebSocket.OPEN) {
@@ -468,26 +339,16 @@
     }
 
     function selectRole(role) {
-      initAudio();
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
       myRole = role;
       changeName();
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: "select_role", role: role }));
-      }
+      ws.send(JSON.stringify({ type: "select_role", role: role }));
     }
 
     function requestStart() {
-      initAudio();
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        alert("서버와 통신 연결 중입니다. 상단 초록색 불이 켜지면 눌러주세요!");
-        return;
-      }
-      changeName();
-      // 내 역할 확정 전송 후 50ms 텀을 두고 start_game 전송하여 패킷 충돌 방지
-      ws.send(JSON.stringify({ type: "select_role", role: myRole }));
-      setTimeout(() => {
-        ws.send(JSON.stringify({ type: "start_game" }));
-      }, 50);
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      if (!myRole) selectRole('bottom');
+      ws.send(JSON.stringify({ type: "start_game" }));
     }
 
     function updateLobbyUI(slots) {
@@ -495,7 +356,7 @@
         const btn = document.getElementById(`btn-${r}`);
         const label = document.getElementById(`label-${r}`);
         const slotData = slots[r];
-
+        
         btn.classList.toggle("active", myRole === r);
         if (slotData.type === "USER") {
           label.innerText = (myRole === r ? "[나] " : "") + slotData.name;
@@ -508,7 +369,6 @@
     }
 
     canvas.addEventListener("touchstart", (e) => {
-      initAudio();
       const touch = e.touches[0];
       lastTouchX = touch.clientX;
       lastTouchY = touch.clientY;
@@ -544,81 +404,23 @@
       lastTouchY = null;
     });
 
-    function drawPuffyPaddle(pos, role, color, name) {
-      ctx.save();
-      const pLen = 70;
-      const pThick = 14;
+    function drawCurvedPaddle(x, y, w, h, color, labelText) {
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      const r = Math.min(w, h) / 2;
+      ctx.roundRect(x, y, w, h, r);
+      ctx.fill();
+      ctx.closePath();
 
-      if (role === "bottom") {
-        const cx = pos;
-        const cy = canvas.height - 16;
-        const grad = ctx.createRadialGradient(cx, cy - 4, 2, cx, cy, pLen / 2);
-        grad.addColorStop(0, "#ffffff");
-        grad.addColorStop(0.3, color);
-        grad.addColorStop(1, "#0f172a");
-
-        ctx.fillStyle = grad;
-        ctx.beginPath();
-        ctx.moveTo(cx - pLen / 2, cy + 6);
-        ctx.bezierCurveTo(cx - pLen / 2, cy - pThick, cx + pLen / 2, cy - pThick, cx + pLen / 2, cy + 6);
-        ctx.closePath();
-        ctx.fill();
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
-
-        ctx.fillStyle = "#ffffff";
-        ctx.font = "bold 12px sans-serif";
+      ctx.fillStyle = "#fff";
+      ctx.font = "bold 11px sans-serif";
+      if (w > h) {
         ctx.textAlign = "center";
-        ctx.fillText(name, cx, cy - pThick - 4);
-
-      } else if (role === "left") {
-        const cx = 16;
-        const cy = pos;
-        const grad = ctx.createRadialGradient(cx + 4, cy, 2, cx, cy, pLen / 2);
-        grad.addColorStop(0, "#ffffff");
-        grad.addColorStop(0.3, color);
-        grad.addColorStop(1, "#0f172a");
-
-        ctx.fillStyle = grad;
-        ctx.beginPath();
-        ctx.moveTo(cx - 6, cy - pLen / 2);
-        ctx.bezierCurveTo(cx + pThick, cy - pLen / 2, cx + pThick, cy + pLen / 2, cx - 6, cy + pLen / 2);
-        ctx.closePath();
-        ctx.fill();
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
-
-        ctx.fillStyle = "#ffffff";
-        ctx.font = "bold 12px sans-serif";
-        ctx.textAlign = "left";
-        ctx.fillText(name, cx + pThick + 6, cy + 4);
-
-      } else if (role === "right") {
-        const cx = canvas.width - 16;
-        const cy = pos;
-        const grad = ctx.createRadialGradient(cx - 4, cy, 2, cx, cy, pLen / 2);
-        grad.addColorStop(0, "#ffffff");
-        grad.addColorStop(0.3, color);
-        grad.addColorStop(1, "#0f172a");
-
-        ctx.fillStyle = grad;
-        ctx.beginPath();
-        ctx.moveTo(cx + 6, cy - pLen / 2);
-        ctx.bezierCurveTo(cx - pThick, cy - pLen / 2, cx - pThick, cy + pLen / 2, cx + 6, cy + pLen / 2);
-        ctx.closePath();
-        ctx.fill();
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
-
-        ctx.fillStyle = "#ffffff";
-        ctx.font = "bold 12px sans-serif";
-        ctx.textAlign = "right";
-        ctx.fillText(name, cx - pThick - 6, cy + 4);
+        ctx.fillText(labelText, x + w / 2, y - 6);
+      } else {
+        ctx.textAlign = x < 50 ? "left" : "right";
+        ctx.fillText(labelText, x < 50 ? x + 16 : x - 6, y + h / 2 + 4);
       }
-      ctx.restore();
     }
 
     function render() {
@@ -637,13 +439,13 @@
       });
 
       const isBotBottom = botSlots.includes("bottom");
-      drawPuffyPaddle(paddles.bottom, "bottom", isBotBottom ? "#64748b" : "#00ffcc", playerNames.bottom);
+      drawCurvedPaddle(paddles.bottom - 35, canvas.height - 20, 70, 10, isBotBottom ? "#555" : "#00ffcc", playerNames.bottom);
 
       const isBotLeft = botSlots.includes("left");
-      drawPuffyPaddle(paddles.left, "left", isBotLeft ? "#64748b" : "#ff007f", playerNames.left);
+      drawCurvedPaddle(10, paddles.left - 35, 10, 70, isBotLeft ? "#555" : "#ff007f", playerNames.left);
 
       const isBotRight = botSlots.includes("right");
-      drawPuffyPaddle(paddles.right, "right", isBotRight ? "#64748b" : "#ffaa00", playerNames.right);
+      drawCurvedPaddle(canvas.width - 20, paddles.right - 35, 10, 70, isBotRight ? "#555" : "#ffaa00", playerNames.right);
 
       ctx.beginPath();
       ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
