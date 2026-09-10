@@ -24,8 +24,8 @@ paddle_positions = {
 ball = {
     "x": WIDTH / 2,
     "y": HEIGHT / 2 + 100,
-    "vx": 3.2,
-    "vy": -3.2,
+    "vx": 5.5,
+    "vy": -5.5,
     "radius": 8
 }
 
@@ -76,7 +76,7 @@ async def unregister(ws):
 
 def update_ai_bots():
     """사람이 없는 빈자리는 컴퓨터 AI가 공의 위치를 추적하여 패들을 조작"""
-    ai_speed = 3.8
+    ai_speed = 6.0
 
     # 1. 하단 슬롯이 비었을 때 (X축 추적)
     if "bottom" in AVAILABLE_ROLES:
@@ -128,7 +128,7 @@ async def game_loop():
             if pad_x - PADDLE_LENGTH / 2 <= ball["x"] <= pad_x + PADDLE_LENGTH / 2:
                 ball["vy"] = -abs(ball["vy"])
                 offset = (ball["x"] - pad_x) / (PADDLE_LENGTH / 2)
-                ball["vx"] = offset * 4.2
+                ball["vx"] = offset * 6.0
             elif ball["y"] > HEIGHT + 25:
                 ball["x"], ball["y"] = WIDTH / 2, HEIGHT / 2 + 80
                 ball["vx"], ball["vy"] = random.choice([-3.0, 3.0]), -3.2
@@ -139,7 +139,7 @@ async def game_loop():
             if pad_y - PADDLE_LENGTH / 2 <= ball["y"] <= pad_y + PADDLE_LENGTH / 2:
                 ball["vx"] = abs(ball["vx"])
                 offset = (ball["y"] - pad_y) / (PADDLE_LENGTH / 2)
-                ball["vy"] = offset * 4.2
+                ball["vy"] = offset * 6.0
             elif ball["x"] < -25:
                 ball["x"], ball["y"] = WIDTH / 2, HEIGHT / 2
                 ball["vx"], ball["vy"] = 3.2, random.choice([-3.0, 3.0])
@@ -175,7 +175,7 @@ async def game_loop():
             })
             await asyncio.gather(*[ws.send(payload) for ws in PLAYERS.keys()], return_exceptions=True)
 
-        await asyncio.sleep(0.016)
+        await asyncio.sleep(0.012)
 
 async def handler(websocket):
     await register(websocket)
