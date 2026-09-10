@@ -10,7 +10,7 @@ import websockets
 WIDTH = 500
 HEIGHT = 500
 
-VERSION_TITLE = "정통알카노이드_블록피격수정_버전18"
+VERSION_TITLE = "정통알카노이드_구슬정밀판정_버전19 (Precision Orb & Speed Slider)"
 
 SLOTS = {"bottom": None, "left": None, "right": None}
 PLAYER_NAMES = {"bottom": "BOT", "left": "BOT", "right": "BOT"}
@@ -45,8 +45,13 @@ ball_stuck_to = None
 ball_stuck_offset = 0.0
 bot_release_timer = 0.0
 
+# [공 속도 레벨: 기본 6]
 BALL_SPEED_LEVEL = 6
 BALL_BASE_SPEED = BALL_SPEED_LEVEL * 1.02
+
+# [마법구슬 속도 레벨: 기본 7 = 0.048 rad/frame]
+ORB_SPEED_LEVEL = 7
+ORB_BASE_SPEED = (ORB_SPEED_LEVEL / 7.0) * 0.048
 
 ball = {
     "x": WIDTH / 2,
@@ -58,10 +63,11 @@ ball = {
 
 bricks = []
 
+# 마법구슬 크기 축소: 13 -> 9
 orb = {
     "angle": 0.0,
-    "speed": 0.048,
-    "radius": 13,
+    "speed": ORB_BASE_SPEED,
+    "radius": 9,
     "cx": 250,
     "cy": 250,
     "rail_r": 205,
@@ -96,7 +102,6 @@ def generate_stage(stage_num):
     return new_bricks
 
 def restore_broken_bricks():
-    """깨진 블록 중 20%를 HP 2짜리 부활 블록으로 복원"""
     dead_bricks = [b for b in bricks if not b["alive"]]
     if not dead_bricks:
         return 0
@@ -180,7 +185,8 @@ async def broadcast_lobby():
         "game_started": game_started,
         "waiting_users": waiting_users,
         "stage": current_stage,
-        "speed_level": BALL_SPEED_LEVEL
+        "speed_level": BALL_SPEED_LEVEL,
+        "orb_speed_level": ORB_SPEED_LEVEL
     })
     for ws in list(CONNECTED_CLIENTS.keys()):
         try:
@@ -253,9 +259,10 @@ async def game_loop():
                     ball["x"] += step_vx
                     ball["y"] += step_vy
 
-                    # 구슬 접촉 -> 20% 복원
+                    # [핵심 판정] 마법구슬과 공이 30% 이상 겹칠 때만 삼킴 (거리 <= 반지름합 * 0.70)
+                    overlap_threshold = (ball["radius"] + orb["radius"]) * 0.70
                     d_orb = math.hypot(ball["x"] - orb_x, ball["y"] - orb_y)
-                    if d_orb <= (ball["radius"] + orb["radius"]):
+                    if d_orb <= overlap_threshold:
                         orb["holding_ball"] = True
                         orb["hold_rotated"] = 0.0
                         ball["x"] = orb_x
@@ -356,7 +363,7 @@ async def game_loop():
                             reset_ball()
                             break
 
-                    # 5. 벽돌 충돌 및 HP 감량 판정
+                    # 5. 벽돌 충돌
                     r = ball["radius"]
                     for b in bricks:
                         if not b["alive"]:
@@ -369,7 +376,6 @@ async def game_loop():
                         dist_y = ball["y"] - closest_y
 
                         if (dist_x * dist_x + dist_y * dist_y) < (r * r):
-                            # [핵심] HP 1 감소
                             b["hp"] -= 1
 
                             if b["hp"] <= 0:
@@ -378,12 +384,10 @@ async def game_loop():
                                 if last_hitter in SCORES:
                                     SCORES[last_hitter] += 100
 
-                                # 부활 블록을 완전히 파괴한 플레이어에게 15초 특수기능 부여
                                 if b["hardened"] and last_hitter:
                                     magnet_active_until[last_hitter] = now + 15.0
                                     sound_event = "powerup"
                             else:
-                                # 부활 블록 1회 타격 (HP 1 남음)
                                 sound_event = "hard_hit"
 
                             overlap_left = (ball["x"] + r) - b["x"]
@@ -411,7 +415,6 @@ async def game_loop():
             waiting_users = [info["name"] for ws, info in CONNECTED_CLIENTS.items() if info.get("state") == "waiting"]
             remaining_pause = max(0.0, pause_until - now)
 
-            # 살아있는 벽돌 목록 완전 전송
             alive_bricks_list = [{
                 "id": b["id"],
                 "x": b["x"],
@@ -444,6 +447,7 @@ async def game_loop():
                     "rail_cx": orb["cx"],
                     "rail_cy": orb["cy"],
                     "rail_r": orb["rail_r"],
+                    "radius": orb["radius"],
                     "holding": orb["holding_ball"],
                     "progress": charge_progress
                 }
@@ -457,7 +461,8 @@ async def game_loop():
         await asyncio.sleep(0.016)
 
 async def handler(websocket):
-    global game_started, current_stage, bricks, SCORES, pause_until, BALL_SPEED_LEVEL, BALL_BASE_SPEED
+    global game_started, current_stage, bricks, SCORES, pause_until
+    global BALL_SPEED_LEVEL, BALL_BASE_SPEED, ORB_SPEED_LEVEL, ORB_BASE_SPEED, orb
 
     new_user_name = f"플레이어{random.randint(100, 999)}"
     assigned_role = None
@@ -509,6 +514,14 @@ async def handler(websocket):
                         BALL_BASE_SPEED = BALL_SPEED_LEVEL * 1.02
                         await broadcast_lobby()
 
+                elif msg_type == "set_orb_speed":
+                    if not game_started:
+                        lvl = max(1, min(10, int(data.get("level", 7))))
+                        ORB_SPEED_LEVEL = lvl
+                        ORB_BASE_SPEED = (ORB_SPEED_LEVEL / 7.0) * 0.048
+                        orb["speed"] = ORB_BASE_SPEED
+                        await broadcast_lobby()
+
                 elif msg_type == "select_role":
                     if game_started:
                         continue
@@ -528,6 +541,8 @@ async def handler(websocket):
                     SCORES = {"bottom": 0, "left": 0, "right": 0}
                     bricks = generate_stage(current_stage)
                     BALL_BASE_SPEED = BALL_SPEED_LEVEL * 1.02
+                    ORB_BASE_SPEED = (ORB_SPEED_LEVEL / 7.0) * 0.048
+                    orb["speed"] = ORB_BASE_SPEED
                     reset_ball()
                     game_started = True
                     pause_until = time.time() + 2.0
