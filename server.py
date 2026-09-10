@@ -10,7 +10,7 @@ import websockets
 WIDTH = 500
 HEIGHT = 500
 
-VERSION_TITLE = "정통알카노이드_게이지추가_버전15 (Orb Charge Gauge)"
+VERSION_TITLE = "정통알카노이드_블록복원_버전16 (Block Regeneration 20%)"
 
 SLOTS = {"bottom": None, "left": None, "right": None}
 PLAYER_NAMES = {"bottom": "BOT", "left": "BOT", "right": "BOT"}
@@ -48,7 +48,6 @@ ball = {
 
 bricks = []
 
-# [마법구슬 및 포획 회전 설정]
 orb = {
     "angle": 0.0,
     "speed": 0.048,
@@ -85,6 +84,18 @@ def generate_stage(stage_num):
                     new_bricks.append({"id": brick_id, "x": center_x - 144 + c * 36, "y": center_y - 88 + r * 22, "w": 30, "h": 14, "alive": True})
                     brick_id += 1
     return new_bricks
+
+def restore_broken_bricks():
+    """깨진 블록의 20%를 무작위로 부활"""
+    dead_bricks = [b for b in bricks if not b["alive"]]
+    if not dead_bricks:
+        return 0
+
+    count_to_restore = max(1, round(len(dead_bricks) * 0.2))
+    to_revive = random.sample(dead_bricks, min(count_to_restore, len(dead_bricks)))
+    for b in to_revive:
+        b["alive"] = True
+    return len(to_revive)
 
 def reset_ball():
     global ball, last_hitter, ai_offsets, orb
@@ -158,13 +169,11 @@ async def game_loop():
             orb_x = orb["cx"] + orb["rail_r"] * math.cos(orb["angle"])
             orb_y = orb["cy"] + orb["rail_r"] * math.sin(orb["angle"])
 
-            # 마법구슬 포획 1바퀴 회전 및 진행률 계산
             charge_progress = 0.0
             if orb["holding_ball"]:
                 orb["hold_rotated"] += orb["speed"]
                 ball["x"] = orb_x
                 ball["y"] = orb_y
-                # 0.0 ~ 1.0 (0% ~ 100%)
                 charge_progress = min(1.0, orb["hold_rotated"] / (2 * math.pi))
 
                 if orb["hold_rotated"] >= (2 * math.pi):
@@ -195,14 +204,16 @@ async def game_loop():
                     ball["x"] += step_vx
                     ball["y"] += step_vy
 
-                    # 구슬 접촉 -> 공 삼키기(포획) 시작
+                    # [핵심] 구슬이 공을 삼키는 순간 20% 블록 복원
                     d_orb = math.hypot(ball["x"] - orb_x, ball["y"] - orb_y)
                     if d_orb <= (ball["radius"] + orb["radius"]):
                         orb["holding_ball"] = True
                         orb["hold_rotated"] = 0.0
                         ball["x"] = orb_x
                         ball["y"] = orb_y
-                        sound_event = "catch"
+                        
+                        revived_count = restore_broken_bricks()
+                        sound_event = "restore" if revived_count > 0 else "catch"
                         break
 
                     # 1. 상단 벽
@@ -327,7 +338,7 @@ async def game_loop():
                 "bot_slots": bot_list,
                 "stage": current_stage,
                 "waiting_users": waiting_users,
-                "bricks": [b["id"] for b in bricks if not b["alive"]],
+                "alive_brick_ids": [b["id"] for b in bricks if b["alive"]],
                 "pause_sec": remaining_pause,
                 "sound": sound_event,
                 "orb": {
