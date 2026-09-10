@@ -5,16 +5,16 @@ import os
 import random
 import websockets
 
-# 완벽한 1:1 정사각 가상 해상도 (500 x 500)
 WIDTH = 500
 HEIGHT = 500
 
-VERSION_TITLE = "포트자동연결_완성버전9.2 (Port Auto Bind & SFX)"
+VERSION_TITLE = "소켓안정화_크래시픽스9.4 (Stable Sockets & No Drop)"
 
+# 슬롯 관리: websocket 객체 대신 고유 id(id(ws))나 플레이어 이름을 안전하게 매핑
 SLOTS = {"bottom": None, "left": None, "right": None}
 PLAYER_NAMES = {"bottom": "BOT", "left": "BOT", "right": "BOT"}
 SCORES = {"bottom": 0, "left": 0, "right": 0}
-CONNECTED_CLIENTS = {}
+CONNECTED_CLIENTS = {}  # ws: {"role": None, "name": "익명", "state": "lobby"}
 
 game_started = False
 is_counting_down = False
@@ -44,7 +44,6 @@ def generate_stage(stage_num):
     brick_id = 0
     center_x, center_y = WIDTH / 2, HEIGHT / 2 - 20
     if stage_num == 1:
-        # 스테이지 1: 6x6 정사각 중앙 배치
         rows, cols = 6, 6
         start_x = (WIDTH - (cols * 36)) / 2 + 3
         start_y = (HEIGHT - (rows * 22)) / 2 - 20
@@ -53,14 +52,12 @@ def generate_stage(stage_num):
                 new_bricks.append({"id": brick_id, "x": start_x + c * 36, "y": start_y + r * 22, "w": 30, "h": 14, "alive": True})
                 brick_id += 1
     elif stage_num == 2:
-        # 스테이지 2: 십자형 정방 대칭
         for r in range(7):
             for c in range(7):
                 if r == 3 or c == 3 or (abs(r - 3) + abs(c - 3) <= 2):
                     new_bricks.append({"id": brick_id, "x": center_x - 126 + c * 36, "y": center_y - 77 + r * 22, "w": 30, "h": 14, "alive": True})
                     brick_id += 1
     else:
-        # 스테이지 3: 8x8 다이아몬드 요새
         for r in range(8):
             for c in range(8):
                 if r in [0, 7] or c in [0, 7] or (r in [3, 4] and c in [3, 4]):
@@ -99,13 +96,24 @@ def update_ai():
         paddle_positions["right"] += max(-ai_speed, min(ai_speed, ty - cy))
         paddle_positions["right"] = max(40, min(HEIGHT - 40, paddle_positions["right"]))
 
+async def safe_send(ws, message):
+    try:
+        await ws.send(message)
+    except Exception:
+        pass
+
 async def broadcast_lobby():
     slots_info = {}
     for role in ["bottom", "left", "right"]:
-        ws = SLOTS[role]
-        slots_info[role] = {"type": "BOT" if ws is None else "USER", "name": PLAYER_NAMES[role]}
+        ws_owner = SLOTS[role]
+        slots_info[role] = {
+            "type": "BOT" if ws_owner is None else "USER",
+            "name": PLAYER_NAMES[role]
+        }
 
-    waiting_users = [info["name"] for ws, info in CONNECTED_CLIENTS.items() if info["state"] == "waiting"]
+    waiting_users = [
+        info["name"] for ws, info in list(CONNECTED_CLIENTS.items()) if info.get("state") == "waiting"
+    ]
 
     payload = json.dumps({
         "type": "lobby_state",
@@ -117,11 +125,10 @@ async def broadcast_lobby():
         "waiting_users": waiting_users,
         "stage": current_stage
     })
-    for ws in list(CONNECTED_CLIENTS.keys()):
-        try:
-            await ws.send(payload)
-        except:
-            pass
+
+    targets = list(CONNECTED_CLIENTS.keys())
+    for ws in targets:
+        await safe_send(ws, payload)
 
 def enforce_non_vertical(vx, vy, base_dir="y"):
     min_comp = 2.4
@@ -146,14 +153,13 @@ async def game_loop():
             sub_steps = 4
             step_vx = ball["vx"] / sub_steps
             step_vy = ball["vy"] / sub_steps
-
             sound_events = []
 
             for _ in range(sub_steps):
                 ball["x"] += step_vx
                 ball["y"] += step_vy
 
-                # 1. 상단 천장 반사
+                # 1. 상단 벽
                 if ball["y"] - ball["radius"] <= 10:
                     ball["y"] = 10 + ball["radius"]
                     ball["vy"] = abs(ball["vy"])
@@ -162,13 +168,12 @@ async def game_loop():
                     step_vy = ball["vy"] / sub_steps
                     sound_events.append("wall")
 
-                # 2. 하단 패들 충돌 (빵 돔 곡면 반사)
+                # 2. 하단 패들
                 if ball["y"] + ball["radius"] >= HEIGHT - 24:
                     pad_x = paddle_positions["bottom"]
                     if pad_x - P_LEN / 2 <= ball["x"] <= pad_x + P_LEN / 2:
                         ball["y"] = HEIGHT - 24 - ball["radius"]
                         offset = (ball["x"] - pad_x) / (P_LEN / 2)
-                        
                         if abs(offset) < 0.2:
                             offset = 0.35 if offset >= 0 else -0.35
                         rebound_angle = offset * (math.pi / 2.7)
@@ -185,7 +190,7 @@ async def game_loop():
                         reset_ball()
                         break
 
-                # 3. 좌측 패들 충돌 (빵 돔 곡면 반사)
+                # 3. 좌측 패들
                 if ball["x"] - ball["radius"] <= 24:
                     pad_y = paddle_positions["left"]
                     if pad_y - P_LEN / 2 <= ball["y"] <= pad_y + P_LEN / 2:
@@ -208,7 +213,7 @@ async def game_loop():
                         reset_ball()
                         break
 
-                # 4. 우측 패들 충돌 (빵 돔 곡면 반사)
+                # 4. 우측 패들
                 if ball["x"] + ball["radius"] >= WIDTH - 24:
                     pad_y = paddle_positions["right"]
                     if pad_y - P_LEN / 2 <= ball["y"] <= pad_y + P_LEN / 2:
@@ -231,7 +236,7 @@ async def game_loop():
                         reset_ball()
                         break
 
-                # 5. 벽돌 충돌 및 점수
+                # 5. 벽돌 충돌
                 r = ball["radius"]
                 for b in bricks:
                     if not b["alive"]:
@@ -263,14 +268,15 @@ async def game_loop():
                             ball["y"] = b["y"] - r - 0.5 if overlap_top < overlap_bottom else b["y"] + b["h"] + r + 0.5
                         break
 
-            # 스테이지 클리어 확인
             if sum(1 for b in bricks if b["alive"]) == 0:
                 current_stage = (current_stage % TOTAL_STAGES) + 1
                 bricks = generate_stage(current_stage)
                 reset_ball()
 
-            bot_list = [role for role, ws in SLOTS.items() if ws is None]
-            waiting_users = [info["name"] for ws, info in CONNECTED_CLIENTS.items() if info["state"] == "waiting"]
+            bot_list = [role for role, ws_owner in SLOTS.items() if ws_owner is None]
+            waiting_users = [
+                info["name"] for ws, info in list(CONNECTED_CLIENTS.items()) if info.get("state") == "waiting"
+            ]
 
             payload = json.dumps({
                 "type": "game_update",
@@ -284,11 +290,10 @@ async def game_loop():
                 "sound": sound_events[0] if sound_events else None,
                 "bricks": [b["id"] for b in bricks if not b["alive"]]
             })
-            for ws in list(CONNECTED_CLIENTS.keys()):
-                try:
-                    await ws.send(payload)
-                except:
-                    pass
+
+            targets = list(CONNECTED_CLIENTS.keys())
+            for ws in targets:
+                await safe_send(ws, payload)
 
         await asyncio.sleep(0.016)
 
@@ -310,10 +315,7 @@ async def start_countdown_and_run():
             "stage": current_stage
         })
         for ws in list(CONNECTED_CLIENTS.keys()):
-            try:
-                await ws.send(cnt_payload)
-            except:
-                pass
+            await safe_send(ws, cnt_payload)
         await asyncio.sleep(1.0)
 
     is_counting_down = False
@@ -324,61 +326,82 @@ async def start_countdown_and_run():
         "bricks": bricks
     })
     for ws in list(CONNECTED_CLIENTS.keys()):
-        try:
-            await ws.send(start_payload)
-        except:
-            pass
+        await safe_send(ws, start_payload)
 
 async def handler(websocket):
     state = "waiting" if game_started else "lobby"
-    CONNECTED_CLIENTS[websocket] = {"role": None, "name": f"게스트{random.randint(100, 999)}", "state": state}
+    CONNECTED_CLIENTS[websocket] = {
+        "role": None,
+        "name": f"게스트{random.randint(100, 999)}",
+        "state": state
+    }
 
     if game_started:
-        await websocket.send(json.dumps({
+        await safe_send(websocket, json.dumps({
             "type": "waiting_room_notice",
             "bricks": bricks,
             "names": PLAYER_NAMES,
             "stage": current_stage
         }))
+
     await broadcast_lobby()
 
     try:
         async for message in websocket:
-            data = json.loads(message)
-            msg_type = data.get("type")
+            try:
+                data = json.loads(message)
+                msg_type = data.get("type")
 
-            if msg_type == "set_name":
-                CONNECTED_CLIENTS[websocket]["name"] = str(data.get("name", "익명"))[:10]
-                role = CONNECTED_CLIENTS[websocket]["role"]
-                if role:
-                    PLAYER_NAMES[role] = CONNECTED_CLIENTS[websocket]["name"]
-                await broadcast_lobby()
+                if msg_type == "set_name":
+                    client_name = str(data.get("name", "익명")).strip()[:10]
+                    if client_name:
+                        CONNECTED_CLIENTS[websocket]["name"] = client_name
+                        role = CONNECTED_CLIENTS[websocket]["role"]
+                        if role:
+                            PLAYER_NAMES[role] = client_name
+                    await broadcast_lobby()
 
-            elif msg_type == "select_role":
-                if game_started:
-                    continue
-                role = data.get("role")
-                for r in ["bottom", "left", "right"]:
-                    if SLOTS[r] == websocket:
-                        SLOTS[r] = None
-                        PLAYER_NAMES[r] = "BOT"
-                if role in SLOTS and (SLOTS[role] is None or SLOTS[role] == websocket):
-                    SLOTS[role] = websocket
-                    PLAYER_NAMES[role] = CONNECTED_CLIENTS[websocket]["name"]
-                    CONNECTED_CLIENTS[websocket]["role"] = role
-                await broadcast_lobby()
+                elif msg_type == "select_role":
+                    if game_started:
+                        continue
+                    role = data.get("role")
+                    # 이전 슬롯 해제
+                    for r in ["bottom", "left", "right"]:
+                        if SLOTS[r] == websocket:
+                            SLOTS[r] = None
+                            PLAYER_NAMES[r] = "BOT"
+                    
+                    # 새 슬롯 등록
+                    if role in SLOTS:
+                        SLOTS[role] = websocket
+                        PLAYER_NAMES[role] = CONNECTED_CLIENTS[websocket]["name"]
+                        CONNECTED_CLIENTS[websocket]["role"] = role
+                    await broadcast_lobby()
 
-            elif msg_type == "start_game":
-                if not is_counting_down:
-                    for ws in CONNECTED_CLIENTS:
-                        CONNECTED_CLIENTS[ws]["state"] = "playing" if CONNECTED_CLIENTS[ws]["role"] else "waiting"
-                    asyncio.create_task(start_countdown_and_run())
+                elif msg_type == "start_game":
+                    if not is_counting_down:
+                        # 시작 누른 사람에게 역할이 없으면 자동으로 빈자리나 하단 지정
+                        if not CONNECTED_CLIENTS[websocket]["role"]:
+                            for r in ["bottom", "left", "right"]:
+                                if SLOTS[r] is None:
+                                    SLOTS[r] = websocket
+                                    PLAYER_NAMES[r] = CONNECTED_CLIENTS[websocket]["name"]
+                                    CONNECTED_CLIENTS[websocket]["role"] = r
+                                    break
 
-            elif msg_type == "move":
-                role = CONNECTED_CLIENTS[websocket]["role"]
-                if role and game_started and not is_counting_down:
-                    max_limit = WIDTH - 35 if role == "bottom" else HEIGHT - 35
-                    paddle_positions[role] = max(35, min(max_limit, data["pos"]))
+                        for ws_client, info in CONNECTED_CLIENTS.items():
+                            info["state"] = "playing" if info.get("role") else "waiting"
+                        
+                        asyncio.create_task(start_countdown_and_run())
+
+                elif msg_type == "move":
+                    role = CONNECTED_CLIENTS[websocket].get("role")
+                    if role and game_started and not is_counting_down:
+                        max_limit = WIDTH - 35 if role == "bottom" else HEIGHT - 35
+                        paddle_positions[role] = max(35, min(max_limit, float(data["pos"])))
+
+            except Exception as inner_err:
+                print(f"[메시지 처리 에러 방어]: {inner_err}")
 
     except websockets.ConnectionClosed:
         pass
@@ -389,17 +412,16 @@ async def handler(websocket):
                 PLAYER_NAMES[r] = "BOT"
         CONNECTED_CLIENTS.pop(websocket, None)
 
-        active_users = [ws for ws, info in CONNECTED_CLIENTS.items() if info["role"]]
+        active_users = [ws for ws, info in CONNECTED_CLIENTS.items() if info.get("role")]
         if len(active_users) == 0:
             game_started = False
             is_counting_down = False
         await broadcast_lobby()
 
 async def main():
-    # [핵심] Render의 동적 웹 포트($PORT) 자동 읽기 (기본값 8765)
     port = int(os.environ.get("PORT", 8765))
     server = await websockets.serve(handler, "0.0.0.0", port)
-    print(f"[{VERSION_TITLE}] 서버 바인딩 성공! 포트: {port}")
+    print(f"[{VERSION_TITLE}] 서버 정상 가동 중... 포트: {port}")
     await asyncio.gather(server.wait_closed(), game_loop())
 
 if __name__ == "__main__":
