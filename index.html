@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>3인 멀티 알카노이드 (Hot-Join & 2s Delay)</title>
+  <title>3인 멀티 알카노이드 (Magic Orb Rail)</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -174,7 +174,6 @@
     }
     @keyframes spin { 100% { transform: rotate(360deg); } }
 
-    /* 2초 카운트다운 오버레이 */
     #countdownOverlay {
       display: none;
       position: absolute;
@@ -202,7 +201,7 @@
   </style>
 </head>
 <body>
-  <div id="versionTitle">무수직반사_스코어버전9 (Hot-Join & 2s Delay)</div>
+  <div id="versionTitle">무수직반사_스코어버전10 (Magic Orb Rail)</div>
   <div id="netStatus">🟡 Railway 서버 신호 연결 중...</div>
 
   <div id="scoreboard">
@@ -219,7 +218,7 @@
 
     <div id="countdownOverlay" style="display: none;">
       <div id="countdownText">2</div>
-      <div id="countdownSub">새 플레이어 참여! 준비하세요</div>
+      <div id="countdownSub">준비하세요!</div>
     </div>
 
     <div id="lobbyOverlay" class="overlay">
@@ -248,7 +247,7 @@
       <p style="font-size:13px; color:#aaa; text-align:center; line-height:1.5; margin:0 0 16px 0;">
         현재 3명의 플레이어가 대결 중입니다.<br>
         <strong>[대기실]</strong>에서 관전하며 대기해 주세요.<br>
-        누군가 퇴장하면 다음 라운드에 즉시 참여할 수 있습니다!
+        빈 자리가 생기면 즉시 난입 가능합니다!
       </p>
       <div class="name-box" style="width:75%;">
         <input type="text" id="waitingNameInput" placeholder="내 닉네임 설정" maxlength="6">
@@ -285,6 +284,7 @@
     let bricks = [];
     let deadBrickIds = new Set();
     let ball = { x: 250, y: 350, radius: 8 };
+    let orbData = null;
     let paddles = { bottom: 250, left: 250, right: 250 };
     let playerNames = { bottom: "BOT", left: "BOT", right: "BOT" };
     let botSlots = ["bottom", "left", "right"];
@@ -348,6 +348,7 @@
         } 
         else if (msg.type === "game_update") {
           ball = msg.ball;
+          orbData = msg.orb;
           for (let r of ["bottom", "left", "right"]) {
             if (r !== myRole) {
               paddles[r] = msg.paddles[r];
@@ -360,7 +361,6 @@
 
           if (msg.scores) updateScoreboard(msg.scores, playerNames);
 
-          // 2초 카운트다운 처리
           if (msg.pause_sec && msg.pause_sec > 0.05) {
             countdownOverlay.style.display = "flex";
             countdownText.innerText = Math.ceil(msg.pause_sec);
@@ -496,6 +496,38 @@
       ctx.fillStyle = "#333";
       ctx.fillRect(0, 0, canvas.width, 10);
 
+      // [원형 서클 레일 및 마법구슬 렌더링]
+      if (orbData) {
+        // 점선 형태의 미래지향적 에너지 레일
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(orbData.rail_cx, orbData.rail_cy, orbData.rail_r, 0, Math.PI * 2);
+        ctx.strokeStyle = "rgba(0, 255, 204, 0.28)";
+        ctx.lineWidth = 2.5;
+        ctx.setLineDash([6, 6]);
+        ctx.stroke();
+        ctx.closePath();
+
+        // 궤도를 회전하는 마법구슬 (보라/네온 핑크 글로우)
+        ctx.beginPath();
+        ctx.arc(orbData.x, orbData.y, 11, 0, Math.PI * 2);
+        ctx.fillStyle = "#ff00ea";
+        ctx.shadowColor = "#ff00ea";
+        ctx.shadowBlur = 14;
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.closePath();
+
+        // 구슬 내부 코어 하이라이트
+        ctx.beginPath();
+        ctx.arc(orbData.x, orbData.y, 5, 0, Math.PI * 2);
+        ctx.fillStyle = "#ffffff";
+        ctx.fill();
+        ctx.closePath();
+        ctx.restore();
+      }
+
+      // 블록 렌더링
       bricks.forEach(b => {
         if (!deadBrickIds.has(b.id)) {
           ctx.fillStyle = "#2c5282";
@@ -505,6 +537,7 @@
         }
       });
 
+      // 패들 렌더링
       const isBotBottom = botSlots.includes("bottom");
       drawCurvedPaddle(paddles.bottom - 35, canvas.height - 20, 70, 10, isBotBottom ? "#555" : "#00ffcc", playerNames.bottom);
 
@@ -514,6 +547,7 @@
       const isBotRight = botSlots.includes("right");
       drawCurvedPaddle(canvas.width - 20, paddles.right - 35, 10, 70, isBotRight ? "#555" : "#ffaa00", playerNames.right);
 
+      // 게임 볼 렌더링
       ctx.beginPath();
       ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
       ctx.fillStyle = "#fff";
