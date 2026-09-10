@@ -10,7 +10,7 @@ import websockets
 WIDTH = 500
 HEIGHT = 500
 
-VERSION_TITLE = "정통알카노이드_랜덤타점봇_버전13 (Dynamic Contact BOT)"
+VERSION_TITLE = "정통알카노이드_포획회전_속도조절_버전14"
 
 SLOTS = {"bottom": None, "left": None, "right": None}
 PLAYER_NAMES = {"bottom": "BOT", "left": "BOT", "right": "BOT"}
@@ -29,14 +29,16 @@ paddle_positions = {
     "right": HEIGHT / 2
 }
 
-# [핵심] 봇이 공을 받을 때 패들의 어느 부위로 칠지 결정하는 랜덤 오프셋 (-24 ~ +24)
 ai_offsets = {
     "bottom": 0.0,
     "left": 0.0,
     "right": 0.0
 }
 
-BALL_BASE_SPEED = 6.12
+# [공 속도 레벨 시스템: 기본 6레벨 = 6.12]
+BALL_SPEED_LEVEL = 6
+BALL_BASE_SPEED = BALL_SPEED_LEVEL * 1.02
+
 ball = {
     "x": WIDTH / 2,
     "y": HEIGHT / 2 + 100,
@@ -47,14 +49,17 @@ ball = {
 
 bricks = []
 
-# 초대형 고정 원형 레일 및 마법구슬
+# [마법구슬 및 포획 회전 설정]
 orb = {
     "angle": 0.0,
     "speed": 0.048,
     "radius": 13,
     "cx": 250,
     "cy": 250,
-    "rail_r": 205
+    "rail_r": 205,
+    "holding_ball": False,
+    "hold_start_angle": 0.0,
+    "hold_rotated": 0.0
 }
 
 def generate_stage(stage_num):
@@ -84,36 +89,32 @@ def generate_stage(stage_num):
     return new_bricks
 
 def reset_ball():
-    global ball, last_hitter, ai_offsets
+    global ball, last_hitter, ai_offsets, orb
     ball["x"] = WIDTH / 2
     ball["y"] = HEIGHT / 2 + 80
     angle = random.choice([-1, 1]) * random.uniform(0.35, 0.75)
     ball["vx"] = BALL_BASE_SPEED * math.sin(angle)
     ball["vy"] = -abs(BALL_BASE_SPEED * math.cos(angle))
     last_hitter = None
+    orb["holding_ball"] = False
     ai_offsets = {r: random.uniform(-24, 24) for r in ai_offsets}
 
 bricks = generate_stage(current_stage)
 
 def update_ai():
-    """패들의 중앙이 아니라 무작위 타격 지점(ai_offsets)을 목표로 이동"""
-    ai_speed = 5.6
-    
-    # 하단 봇 (공이 아래로 내려올 때 패들 목표점 = 공 위치 + 랜덤 오프셋)
+    ai_speed = BALL_BASE_SPEED * 0.92
     if SLOTS["bottom"] is None:
         target_x = ball["x"] + ai_offsets["bottom"]
         cx = paddle_positions["bottom"]
         paddle_positions["bottom"] += max(-ai_speed, min(ai_speed, target_x - cx))
         paddle_positions["bottom"] = max(40, min(WIDTH - 40, paddle_positions["bottom"]))
 
-    # 좌측 봇
     if SLOTS["left"] is None:
         target_y = ball["y"] + ai_offsets["left"]
         cy = paddle_positions["left"]
         paddle_positions["left"] += max(-ai_speed, min(ai_speed, target_y - cy))
         paddle_positions["left"] = max(40, min(HEIGHT - 40, paddle_positions["left"]))
 
-    # 우측 봇
     if SLOTS["right"] is None:
         target_y = ball["y"] + ai_offsets["right"]
         cy = paddle_positions["right"]
@@ -135,7 +136,8 @@ async def broadcast_lobby():
         "scores": SCORES,
         "game_started": game_started,
         "waiting_users": waiting_users,
-        "stage": current_stage
+        "stage": current_stage,
+        "speed_level": BALL_SPEED_LEVEL
     })
     for ws in list(CONNECTED_CLIENTS.keys()):
         try:
@@ -157,7 +159,29 @@ async def game_loop():
             orb_x = orb["cx"] + orb["rail_r"] * math.cos(orb["angle"])
             orb_y = orb["cy"] + orb["rail_r"] * math.sin(orb["angle"])
 
-            if not is_paused:
+            # [마법구슬 포획 1회전 로직]
+            if orb["holding_ball"]:
+                orb["hold_rotated"] += orb["speed"]
+                ball["x"] = orb_x
+                ball["y"] = orb_y
+
+                # 한 바퀴(2 * PI) 완주 시 내부로 발사
+                if orb["hold_rotated"] >= (2 * math.pi):
+                    orb["holding_ball"] = False
+                    center_dir = math.atan2(orb["cy"] - orb_y, orb["cx"] - orb_x)
+                    toss_angle = center_dir + random.uniform(-math.pi / 4, math.pi / 4)
+
+                    ball["vx"] = BALL_BASE_SPEED * 1.15 * math.cos(toss_angle)
+                    ball["vy"] = BALL_BASE_SPEED * 1.15 * math.sin(toss_angle)
+                    
+                    push_dist = ball["radius"] + orb["radius"] + 4.0
+                    ball["x"] = orb_x + push_dist * math.cos(center_dir)
+                    ball["y"] = orb_y + push_dist * math.sin(center_dir)
+
+                    sound_event = "orb"
+                    ai_offsets = {r: random.uniform(-24, 24) for r in ai_offsets}
+
+            elif not is_paused:
                 update_ai()
 
                 sub_steps = 4
@@ -168,27 +192,17 @@ async def game_loop():
                     ball["x"] += step_vx
                     ball["y"] += step_vy
 
-                    # 마법구슬 충돌
+                    # 마법구슬 피격 -> 공 포획 상태 진입
                     d_orb = math.hypot(ball["x"] - orb_x, ball["y"] - orb_y)
                     if d_orb <= (ball["radius"] + orb["radius"]):
-                        center_dir = math.atan2(orb["cy"] - orb_y, orb["cx"] - orb_x)
-                        toss_angle = center_dir + random.uniform(-math.pi / 4, math.pi / 4)
-                        
-                        ball["vx"] = BALL_BASE_SPEED * 1.15 * math.cos(toss_angle)
-                        ball["vy"] = BALL_BASE_SPEED * 1.15 * math.sin(toss_angle)
-                        
-                        push_dist = ball["radius"] + orb["radius"] + 3.0
-                        ball["x"] = orb_x + push_dist * math.cos(center_dir)
-                        ball["y"] = orb_y + push_dist * math.sin(center_dir)
-
-                        step_vx = ball["vx"] / sub_steps
-                        step_vy = ball["vy"] / sub_steps
-                        sound_event = "orb"
-                        # 마법구슬 맞았을 때도 봇들의 타점 새로 섞기
-                        ai_offsets = {r: random.uniform(-24, 24) for r in ai_offsets}
+                        orb["holding_ball"] = True
+                        orb["hold_rotated"] = 0.0
+                        ball["x"] = orb_x
+                        ball["y"] = orb_y
+                        sound_event = "catch"
                         break
 
-                    # 1. 천장
+                    # 1. 상단 천장
                     if ball["y"] - ball["radius"] <= 10:
                         ball["y"] = 10 + ball["radius"]
                         ball["vy"] = abs(ball["vy"])
@@ -209,7 +223,6 @@ async def game_loop():
                             step_vy = ball["vy"] / sub_steps
                             last_hitter = "bottom"
                             sound_event = "paddle"
-                            # 칠 때마다 다음 공을 위한 랜덤 타점 재추첨
                             ai_offsets["bottom"] = random.uniform(-24, 24)
                         elif ball["y"] > HEIGHT + 30:
                             SCORES["bottom"] = max(0, SCORES["bottom"] - 200)
@@ -315,11 +328,12 @@ async def game_loop():
                 "pause_sec": remaining_pause,
                 "sound": sound_event,
                 "orb": {
-                    "x": orb["cx"] + orb["rail_r"] * math.cos(orb["angle"]),
-                    "y": orb["cy"] + orb["rail_r"] * math.sin(orb["angle"]),
+                    "x": orb_x,
+                    "y": orb_y,
                     "rail_cx": orb["cx"],
                     "rail_cy": orb["cy"],
-                    "rail_r": orb["rail_r"]
+                    "rail_r": orb["rail_r"],
+                    "holding": orb["holding_ball"]
                 }
             })
             for ws in list(CONNECTED_CLIENTS.keys()):
@@ -331,7 +345,7 @@ async def game_loop():
         await asyncio.sleep(0.016)
 
 async def handler(websocket):
-    global game_started, current_stage, bricks, SCORES, pause_until
+    global game_started, current_stage, bricks, SCORES, pause_until, BALL_SPEED_LEVEL, BALL_BASE_SPEED
 
     new_user_name = f"플레이어{random.randint(100, 999)}"
     assigned_role = None
@@ -378,6 +392,13 @@ async def handler(websocket):
                             PLAYER_NAMES[role] = client_name
                     await broadcast_lobby()
 
+                elif msg_type == "set_speed":
+                    if not game_started:
+                        lvl = max(1, min(10, int(data.get("level", 6))))
+                        BALL_SPEED_LEVEL = lvl
+                        BALL_BASE_SPEED = BALL_SPEED_LEVEL * 1.02
+                        await broadcast_lobby()
+
                 elif msg_type == "select_role":
                     if game_started:
                         continue
@@ -396,6 +417,7 @@ async def handler(websocket):
                     current_stage = 1
                     SCORES = {"bottom": 0, "left": 0, "right": 0}
                     bricks = generate_stage(current_stage)
+                    BALL_BASE_SPEED = BALL_SPEED_LEVEL * 1.02
                     reset_ball()
                     game_started = True
                     pause_until = time.time() + 2.0
