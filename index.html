@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>3인 멀티 알카노이드 (정밀 반사 & 스코어)</title>
+  <title>3인 멀티 알카노이드 (Railway 초고속 연결)</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -24,10 +24,18 @@
       font-size: 13px;
       color: #00ffcc;
       font-weight: bold;
-      margin-bottom: 6px;
+      margin-bottom: 4px;
       letter-spacing: 0.5px;
     }
-    /* 실시간 3인 스코어보드 바 */
+    #netStatus {
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 10px;
+      background: #2a2010;
+      color: #ffaa00;
+      margin-bottom: 6px;
+      font-weight: bold;
+    }
     #scoreboard {
       display: flex;
       justify-content: space-around;
@@ -61,7 +69,6 @@
       50% { opacity: 1; transform: scale(1.02); }
     }
 
-    /* 1:1 완벽 정사각 캔버스 */
     #container {
       position: relative;
       width: min(92vw, 480px);
@@ -169,9 +176,9 @@
   </style>
 </head>
 <body>
-  <div id="versionTitle">무수직반사_스코어버전8 (Angle Forced & Score System)</div>
+  <div id="versionTitle">무수직반사_스코어버전8 (Railway 연결)</div>
+  <div id="netStatus">🟡 Railway 서버 신호 연결 중...</div>
 
-  <!-- 스코어보드 -->
   <div id="scoreboard">
     <div class="score-item left" id="score-left">L(좌): 0</div>
     <div class="score-item bottom" id="score-bottom">B(하): 0</div>
@@ -184,28 +191,26 @@
     <div id="stageBadge">STAGE 1 / 3</div>
     <canvas id="game" width="500" height="500"></canvas>
 
-    <!-- 로비 -->
     <div id="lobbyOverlay" class="overlay">
       <h2>포지션 선택 및 참가</h2>
       <div class="name-box">
         <input type="text" id="nameInput" placeholder="닉네임 입력 (최대 6자)" maxlength="6">
-        <button onclick="changeName()">확인</button>
+        <button type="button" onclick="changeName()">확인</button>
       </div>
       <div class="role-grid">
-        <button class="role-btn" id="btn-bottom" onclick="selectRole('bottom')">
+        <button type="button" class="role-btn" id="btn-bottom" onclick="selectRole('bottom')">
           <span>하단 (가로)</span> <span id="label-bottom">BOT</span>
         </button>
-        <button class="role-btn" id="btn-left" onclick="selectRole('left')">
+        <button type="button" class="role-btn" id="btn-left" onclick="selectRole('left')">
           <span>좌측 (세로)</span> <span id="label-left">BOT</span>
         </button>
-        <button class="role-btn" id="btn-right" onclick="selectRole('right')">
+        <button type="button" class="role-btn" id="btn-right" onclick="selectRole('right')">
           <span>우측 (세로)</span> <span id="label-right">BOT</span>
         </button>
       </div>
-      <button id="startBtn" onclick="requestStart()">GAME START</button>
+      <button type="button" id="startBtn" onclick="requestStart()">GAME START</button>
     </div>
 
-    <!-- 대기실 -->
     <div id="waitingOverlay" class="overlay">
       <div class="waiting-spinner"></div>
       <h2 style="color:#ffcc00; margin-bottom:8px;">게임이 이미 진행 중입니다</h2>
@@ -216,7 +221,7 @@
       </p>
       <div class="name-box" style="width:75%;">
         <input type="text" id="waitingNameInput" placeholder="내 닉네임 설정" maxlength="6">
-        <button onclick="changeWaitingName()">등록</button>
+        <button type="button" onclick="changeWaitingName()">등록</button>
       </div>
     </div>
   </div>
@@ -225,6 +230,7 @@
     const canvas = document.getElementById("game");
     const ctx = canvas.getContext("2d");
     const versionTitle = document.getElementById("versionTitle");
+    const netStatus = document.getElementById("netStatus");
     const lobbyOverlay = document.getElementById("lobbyOverlay");
     const waitingOverlay = document.getElementById("waitingOverlay");
     const waitingNoticeBanner = document.getElementById("waitingNoticeBanner");
@@ -236,9 +242,10 @@
     const scoreBottom = document.getElementById("score-bottom");
     const scoreRight = document.getElementById("score-right");
 
-    const WS_URL = "wss://arkanoid-3p-multi.onrender.com";
+    // [Railway 전용 도메인 설정]
+    const WS_URL = "wss://arkanoid3pmulti-production.up.railway.app";
     let ws = null;
-    let myRole = null;
+    let myRole = "bottom";
     let myName = "플레이어" + Math.floor(Math.random() * 900 + 100);
     nameInput.value = myName;
 
@@ -259,10 +266,19 @@
     }
 
     function connectSocket() {
+      netStatus.innerText = "🟡 Railway 연결 시도 중...";
+      netStatus.style.background = "#2a2010";
+      netStatus.style.color = "#ffaa00";
+
       ws = new WebSocket(WS_URL);
 
       ws.onopen = () => {
+        netStatus.innerText = "🟢 Railway 온라인 연결 완료";
+        netStatus.style.background = "#0f3636";
+        netStatus.style.color = "#00ffcc";
+
         ws.send(JSON.stringify({ type: "set_name", name: myName }));
+        ws.send(JSON.stringify({ type: "select_role", role: myRole }));
       };
 
       ws.onmessage = (e) => {
@@ -314,4 +330,163 @@
             waitingNoticeBanner.style.display = "block";
             waitingNoticeBanner.innerText = `🔔 '${msg.waiting_users.join(", ")}' 님이 대기실 대기 중!`;
           } else {
-            waitingNoticeBann
+            waitingNoticeBanner.style.display = "none";
+          }
+          render();
+        }
+      };
+
+      ws.onclose = () => {
+        netStatus.innerText = "🔴 연결 종료 (재접속 대기 중)";
+        netStatus.style.background = "#3a1010";
+        netStatus.style.color = "#ff4444";
+        setTimeout(connectSocket, 2000);
+      };
+    }
+
+    connectSocket();
+
+    function changeName() {
+      if (!nameInput.value.trim()) return;
+      myName = nameInput.value.trim();
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "set_name", name: myName }));
+      }
+    }
+
+    function changeWaitingName() {
+      if (!waitingNameInput.value.trim()) return;
+      myName = waitingNameInput.value.trim();
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "set_name", name: myName }));
+      }
+    }
+
+    function selectRole(role) {
+      myRole = role;
+      changeName();
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "select_role", role: role }));
+      }
+    }
+
+    function requestStart() {
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        alert("서버 연결 중입니다. 상단 초록불이 들어온 후 눌러주세요.");
+        return;
+      }
+      changeName();
+      ws.send(JSON.stringify({ type: "select_role", role: myRole }));
+      setTimeout(() => {
+        ws.send(JSON.stringify({ type: "start_game" }));
+      }, 50);
+    }
+
+    function updateLobbyUI(slots) {
+      ["bottom", "left", "right"].forEach(r => {
+        const btn = document.getElementById(`btn-${r}`);
+        const label = document.getElementById(`label-${r}`);
+        const slotData = slots[r];
+        
+        btn.classList.toggle("active", myRole === r);
+        if (slotData.type === "USER") {
+          label.innerText = (myRole === r ? "[나] " : "") + slotData.name;
+          label.style.color = "#00ffcc";
+        } else {
+          label.innerText = "BOT (컴퓨터)";
+          label.style.color = "#888";
+        }
+      });
+    }
+
+    canvas.addEventListener("touchstart", (e) => {
+      const touch = e.touches[0];
+      lastTouchX = touch.clientX;
+      lastTouchY = touch.clientY;
+    }, { passive: false });
+
+    canvas.addEventListener("touchmove", (e) => {
+      e.preventDefault();
+      if (!myRole || !ws || ws.readyState !== WebSocket.OPEN || lastTouchX === null) return;
+
+      const touch = e.touches[0];
+      const deltaX = touch.clientX - lastTouchX;
+      const deltaY = touch.clientY - lastTouchY;
+      lastTouchX = touch.clientX;
+      lastTouchY = touch.clientY;
+
+      const rect = canvas.getBoundingClientRect();
+      const scale = canvas.width / rect.width;
+
+      if (myRole === "bottom") {
+        paddles.bottom = Math.max(35, Math.min(465, paddles.bottom + deltaX * scale * 1.3));
+        ws.send(JSON.stringify({ type: "move", pos: paddles.bottom }));
+      } else if (myRole === "left") {
+        paddles.left = Math.max(35, Math.min(465, paddles.left + deltaY * scale * 1.3));
+        ws.send(JSON.stringify({ type: "move", pos: paddles.left }));
+      } else if (myRole === "right") {
+        paddles.right = Math.max(35, Math.min(465, paddles.right + deltaY * scale * 1.3));
+        ws.send(JSON.stringify({ type: "move", pos: paddles.right }));
+      }
+    }, { passive: false });
+
+    canvas.addEventListener("touchend", () => {
+      lastTouchX = null;
+      lastTouchY = null;
+    });
+
+    function drawCurvedPaddle(x, y, w, h, color, labelText) {
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      const r = Math.min(w, h) / 2;
+      ctx.roundRect(x, y, w, h, r);
+      ctx.fill();
+      ctx.closePath();
+
+      ctx.fillStyle = "#fff";
+      ctx.font = "bold 11px sans-serif";
+      if (w > h) {
+        ctx.textAlign = "center";
+        ctx.fillText(labelText, x + w / 2, y - 6);
+      } else {
+        ctx.textAlign = x < 50 ? "left" : "right";
+        ctx.fillText(labelText, x < 50 ? x + 16 : x - 6, y + h / 2 + 4);
+      }
+    }
+
+    function render() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      ctx.fillStyle = "#333";
+      ctx.fillRect(0, 0, canvas.width, 10);
+
+      bricks.forEach(b => {
+        if (!deadBrickIds.has(b.id)) {
+          ctx.fillStyle = "#2c5282";
+          ctx.fillRect(b.x, b.y, b.w, b.h);
+          ctx.strokeStyle = "#4299e1";
+          ctx.strokeRect(b.x, b.y, b.w, b.h);
+        }
+      });
+
+      const isBotBottom = botSlots.includes("bottom");
+      drawCurvedPaddle(paddles.bottom - 35, canvas.height - 20, 70, 10, isBotBottom ? "#555" : "#00ffcc", playerNames.bottom);
+
+      const isBotLeft = botSlots.includes("left");
+      drawCurvedPaddle(10, paddles.left - 35, 10, 70, isBotLeft ? "#555" : "#ff007f", playerNames.left);
+
+      const isBotRight = botSlots.includes("right");
+      drawCurvedPaddle(canvas.width - 20, paddles.right - 35, 10, 70, isBotRight ? "#555" : "#ffaa00", playerNames.right);
+
+      ctx.beginPath();
+      ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
+      ctx.fillStyle = "#fff";
+      ctx.shadowColor = "#00d2ff";
+      ctx.shadowBlur = 10;
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.closePath();
+    }
+  </script>
+</body>
+</html>
