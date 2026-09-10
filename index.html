@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>3인 멀티 알카노이드 (Magic Orb Rail)</title>
+  <title>3인 멀티 알카노이드 (Huge Rail & Sound System)</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -201,7 +201,7 @@
   </style>
 </head>
 <body>
-  <div id="versionTitle">무수직반사_스코어버전10 (Magic Orb Rail)</div>
+  <div id="versionTitle">무수직반사_스코어버전11 (Huge Rail & Sound System)</div>
   <div id="netStatus">🟡 Railway 서버 신호 연결 중...</div>
 
   <div id="scoreboard">
@@ -257,6 +257,77 @@
   </div>
 
   <script>
+    // ==========================================
+    // Web Audio API 기반 신디사이저 사운드 엔진
+    // ==========================================
+    let audioCtx = null;
+    function initAudio() {
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      if (audioCtx.state === "suspended") {
+        audioCtx.resume();
+      }
+    }
+
+    function playSynthSound(type) {
+      if (!audioCtx) return;
+      const now = audioCtx.currentTime;
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+
+      if (type === "paddle") {
+        // 패들 반사: 맑고 통통 튀는 삼각파 비프음
+        osc.type = "triangle";
+        osc.frequency.setValueAtTime(320, now);
+        osc.frequency.exponentialRampToValueAtTime(540, now + 0.08);
+        gain.gain.setValueAtTime(0.2, now);
+        gain.gain.linearRampToValueAtTime(0.01, now + 0.08);
+        osc.start(now);
+        osc.stop(now + 0.08);
+      } 
+      else if (type === "brick") {
+        // 벽돌 파괴: 경쾌한 아케이드 하이 피치음
+        osc.type = "square";
+        osc.frequency.setValueAtTime(680, now);
+        osc.frequency.exponentialRampToValueAtTime(980, now + 0.09);
+        gain.gain.setValueAtTime(0.18, now);
+        gain.gain.linearRampToValueAtTime(0.01, now + 0.09);
+        osc.start(now);
+        osc.stop(now + 0.09);
+      } 
+      else if (type === "orb") {
+        // 마법구슬 강타: 공간을 가르는 묵직한 워프 신스음
+        osc.type = "sawtooth";
+        osc.frequency.setValueAtTime(880, now);
+        osc.frequency.exponentialRampToValueAtTime(220, now + 0.22);
+        gain.gain.setValueAtTime(0.25, now);
+        gain.gain.linearRampToValueAtTime(0.01, now + 0.22);
+        osc.start(now);
+        osc.stop(now + 0.22);
+      } 
+      else if (type === "lose") {
+        // 실점: 묵직하게 떨어지는 경고 버저음
+        osc.type = "sawtooth";
+        osc.frequency.setValueAtTime(220, now);
+        osc.frequency.linearRampToValueAtTime(90, now + 0.25);
+        gain.gain.setValueAtTime(0.25, now);
+        gain.gain.linearRampToValueAtTime(0.01, now + 0.25);
+        osc.start(now);
+        osc.stop(now + 0.25);
+      }
+      else if (type === "wall") {
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(400, now);
+        gain.gain.setValueAtTime(0.1, now);
+        gain.gain.linearRampToValueAtTime(0.01, now + 0.05);
+        osc.start(now);
+        osc.stop(now + 0.05);
+      }
+    }
+
     const canvas = document.getElementById("game");
     const ctx = canvas.getContext("2d");
     const versionTitle = document.getElementById("versionTitle");
@@ -368,6 +439,10 @@
             countdownOverlay.style.display = "none";
           }
 
+          if (msg.sound) {
+            playSynthSound(msg.sound);
+          }
+
           render();
         }
       };
@@ -383,6 +458,7 @@
     connectSocket();
 
     function changeName() {
+      initAudio();
       if (!nameInput.value.trim()) return;
       myName = nameInput.value.trim();
       if (ws && ws.readyState === WebSocket.OPEN) {
@@ -391,6 +467,7 @@
     }
 
     function changeWaitingName() {
+      initAudio();
       if (!waitingNameInput.value.trim()) return;
       myName = waitingNameInput.value.trim();
       if (ws && ws.readyState === WebSocket.OPEN) {
@@ -399,6 +476,7 @@
     }
 
     function selectRole(role) {
+      initAudio();
       myRole = role;
       changeName();
       if (ws && ws.readyState === WebSocket.OPEN) {
@@ -407,6 +485,7 @@
     }
 
     function requestStart() {
+      initAudio();
       if (!ws || ws.readyState !== WebSocket.OPEN) {
         alert("서버 연결 중입니다. 초록불이 들어온 후 눌러주세요.");
         return;
@@ -436,6 +515,7 @@
     }
 
     canvas.addEventListener("touchstart", (e) => {
+      initAudio();
       const touch = e.touches[0];
       lastTouchX = touch.clientX;
       lastTouchY = touch.clientY;
@@ -493,41 +573,41 @@
     function render() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+      // 상단 가드레일
       ctx.fillStyle = "#333";
       ctx.fillRect(0, 0, canvas.width, 10);
 
-      // [원형 서클 레일 및 마법구슬 렌더링]
+      // [패들 바로 앞까지 펼쳐진 초대형 고정 서클 레일 및 발광 마법구슬]
       if (orbData) {
-        // 점선 형태의 미래지향적 에너지 레일
         ctx.save();
         ctx.beginPath();
         ctx.arc(orbData.rail_cx, orbData.rail_cy, orbData.rail_r, 0, Math.PI * 2);
-        ctx.strokeStyle = "rgba(0, 255, 204, 0.28)";
-        ctx.lineWidth = 2.5;
-        ctx.setLineDash([6, 6]);
+        ctx.strokeStyle = "rgba(0, 255, 204, 0.22)";
+        ctx.lineWidth = 2;
+        ctx.setLineDash([8, 8]);
         ctx.stroke();
         ctx.closePath();
 
-        // 궤도를 회전하는 마법구슬 (보라/네온 핑크 글로우)
+        // 외곽 네온 글로우 마법구슬
         ctx.beginPath();
-        ctx.arc(orbData.x, orbData.y, 11, 0, Math.PI * 2);
+        ctx.arc(orbData.x, orbData.y, 13, 0, Math.PI * 2);
         ctx.fillStyle = "#ff00ea";
         ctx.shadowColor = "#ff00ea";
-        ctx.shadowBlur = 14;
+        ctx.shadowBlur = 18;
         ctx.fill();
         ctx.shadowBlur = 0;
         ctx.closePath();
 
-        // 구슬 내부 코어 하이라이트
+        // 구슬 내부 코어
         ctx.beginPath();
-        ctx.arc(orbData.x, orbData.y, 5, 0, Math.PI * 2);
+        ctx.arc(orbData.x, orbData.y, 6, 0, Math.PI * 2);
         ctx.fillStyle = "#ffffff";
         ctx.fill();
         ctx.closePath();
         ctx.restore();
       }
 
-      // 블록 렌더링
+      // 벽돌 렌더링
       bricks.forEach(b => {
         if (!deadBrickIds.has(b.id)) {
           ctx.fillStyle = "#2c5282";
@@ -547,7 +627,7 @@
       const isBotRight = botSlots.includes("right");
       drawCurvedPaddle(canvas.width - 20, paddles.right - 35, 10, 70, isBotRight ? "#555" : "#ffaa00", playerNames.right);
 
-      // 게임 볼 렌더링
+      // 공 렌더링
       ctx.beginPath();
       ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
       ctx.fillStyle = "#fff";
