@@ -10,7 +10,7 @@ import websockets
 WIDTH = 500
 HEIGHT = 500
 
-VERSION_TITLE = "정통알카노이드_블록복원_버전16 (Block Regeneration 20%)"
+VERSION_TITLE = "정통알카노이드_특수아이템_버전17 (Hardened Brick & Magnet Paddle)"
 
 SLOTS = {"bottom": None, "left": None, "right": None}
 PLAYER_NAMES = {"bottom": "BOT", "left": "BOT", "right": "BOT"}
@@ -34,6 +34,17 @@ ai_offsets = {
     "left": 0.0,
     "right": 0.0
 }
+
+# [15초 특수 아이템: 자석 패들 상태 변수]
+magnet_active_until = {
+    "bottom": 0.0,
+    "left": 0.0,
+    "right": 0.0
+}
+
+ball_stuck_to = None      # "bottom", "left", "right" 중 하나 또는 None
+ball_stuck_offset = 0.0   # 패들 중앙 기준 공이 붙은 상대적 위치
+bot_release_timer = 0.0   # 봇이 공을 잡았을 때 1초 후 자동 발사
 
 BALL_SPEED_LEVEL = 6
 BALL_BASE_SPEED = BALL_SPEED_LEVEL * 1.02
@@ -69,24 +80,24 @@ def generate_stage(stage_num):
         start_y = (HEIGHT - (rows * 22)) / 2 - 10
         for r in range(rows):
             for c in range(cols):
-                new_bricks.append({"id": brick_id, "x": start_x + c * 36, "y": start_y + r * 22, "w": 30, "h": 14, "alive": True})
+                new_bricks.append({"id": brick_id, "x": start_x + c * 36, "y": start_y + r * 22, "w": 30, "h": 14, "alive": True, "hp": 1, "hardened": False})
                 brick_id += 1
     elif stage_num == 2:
         for r in range(7):
             for c in range(7):
                 if r == 3 or c == 3 or (abs(r - 3) + abs(c - 3) <= 2):
-                    new_bricks.append({"id": brick_id, "x": center_x - 126 + c * 36, "y": center_y - 77 + r * 22, "w": 30, "h": 14, "alive": True})
+                    new_bricks.append({"id": brick_id, "x": center_x - 126 + c * 36, "y": center_y - 77 + r * 22, "w": 30, "h": 14, "alive": True, "hp": 1, "hardened": False})
                     brick_id += 1
     else:
         for r in range(8):
             for c in range(8):
                 if r in [0, 7] or c in [0, 7] or (r in [3, 4] and c in [3, 4]):
-                    new_bricks.append({"id": brick_id, "x": center_x - 144 + c * 36, "y": center_y - 88 + r * 22, "w": 30, "h": 14, "alive": True})
+                    new_bricks.append({"id": brick_id, "x": center_x - 144 + c * 36, "y": center_y - 88 + r * 22, "w": 30, "h": 14, "alive": True, "hp": 1, "hardened": False})
                     brick_id += 1
     return new_bricks
 
 def restore_broken_bricks():
-    """깨진 블록의 20%를 무작위로 부활"""
+    """깨진 블록의 20%를 HP=2 특수 강화 블록으로 부활"""
     dead_bricks = [b for b in bricks if not b["alive"]]
     if not dead_bricks:
         return 0
@@ -95,19 +106,43 @@ def restore_broken_bricks():
     to_revive = random.sample(dead_bricks, min(count_to_restore, len(dead_bricks)))
     for b in to_revive:
         b["alive"] = True
+        b["hp"] = 2
+        b["hardened"] = True
     return len(to_revive)
 
 def reset_ball():
-    global ball, last_hitter, ai_offsets, orb
+    global ball, last_hitter, ai_offsets, orb, ball_stuck_to
     ball["x"] = WIDTH / 2
     ball["y"] = HEIGHT / 2 + 80
     angle = random.choice([-1, 1]) * random.uniform(0.35, 0.75)
     ball["vx"] = BALL_BASE_SPEED * math.sin(angle)
     ball["vy"] = -abs(BALL_BASE_SPEED * math.cos(angle))
     last_hitter = None
+    ball_stuck_to = None
     orb["holding_ball"] = False
     orb["hold_rotated"] = 0.0
     ai_offsets = {r: random.uniform(-24, 24) for r in ai_offsets}
+
+def release_stuck_ball(role):
+    """패들에 붙어있던 공을 발사"""
+    global ball_stuck_to, ball
+    if ball_stuck_to != role:
+        return
+
+    offset = max(-1.0, min(1.0, ball_stuck_offset / 35.0))
+    rebound_angle = offset * (math.pi / 3.0)
+
+    if role == "bottom":
+        ball["vx"] = BALL_BASE_SPEED * math.sin(rebound_angle)
+        ball["vy"] = -BALL_BASE_SPEED * math.cos(rebound_angle)
+    elif role == "left":
+        ball["vx"] = BALL_BASE_SPEED * math.cos(rebound_angle)
+        ball["vy"] = BALL_BASE_SPEED * math.sin(rebound_angle)
+    elif role == "right":
+        ball["vx"] = -BALL_BASE_SPEED * math.cos(rebound_angle)
+        ball["vy"] = BALL_BASE_SPEED * math.sin(rebound_angle)
+
+    ball_stuck_to = None
 
 bricks = generate_stage(current_stage)
 
@@ -157,6 +192,7 @@ async def broadcast_lobby():
 
 async def game_loop():
     global game_started, current_stage, bricks, ball, last_hitter, pause_until, orb, ai_offsets
+    global ball_stuck_to, ball_stuck_offset, bot_release_timer
     P_LEN = 70
 
     while True:
@@ -193,6 +229,23 @@ async def game_loop():
                     charge_progress = 1.0
                     ai_offsets = {r: random.uniform(-24, 24) for r in ai_offsets}
 
+            # 패들에 공이 붙어있는 상태 처리
+            elif ball_stuck_to:
+                if ball_stuck_to == "bottom":
+                    ball["x"] = paddle_positions["bottom"] + ball_stuck_offset
+                    ball["y"] = HEIGHT - 22 - ball["radius"]
+                elif ball_stuck_to == "left":
+                    ball["x"] = 22 + ball["radius"]
+                    ball["y"] = paddle_positions["left"] + ball_stuck_offset
+                elif ball_stuck_to == "right":
+                    ball["x"] = WIDTH - 22 - ball["radius"]
+                    ball["y"] = paddle_positions["right"] + ball_stuck_offset
+
+                # BOT이 잡고 있는 경우 1초 후 자동 릴리즈
+                if SLOTS[ball_stuck_to] is None and now >= bot_release_timer:
+                    release_stuck_ball(ball_stuck_to)
+                    sound_event = "paddle"
+
             elif not is_paused:
                 update_ai()
 
@@ -204,7 +257,7 @@ async def game_loop():
                     ball["x"] += step_vx
                     ball["y"] += step_vy
 
-                    # [핵심] 구슬이 공을 삼키는 순간 20% 블록 복원
+                    # 구슬 접촉 -> 20% 강화 블록 복원
                     d_orb = math.hypot(ball["x"] - orb_x, ball["y"] - orb_y)
                     if d_orb <= (ball["radius"] + orb["radius"]):
                         orb["holding_ball"] = True
@@ -227,17 +280,25 @@ async def game_loop():
                     if ball["y"] + ball["radius"] >= HEIGHT - 22:
                         pad_x = paddle_positions["bottom"]
                         if pad_x - P_LEN / 2 <= ball["x"] <= pad_x + P_LEN / 2:
-                            ball["y"] = HEIGHT - 22 - ball["radius"]
-                            offset = (ball["x"] - pad_x) / (P_LEN / 2)
-                            rebound_angle = offset * (math.pi / 3.0)
-                            
-                            ball["vx"] = BALL_BASE_SPEED * math.sin(rebound_angle)
-                            ball["vy"] = -BALL_BASE_SPEED * math.cos(rebound_angle)
-                            step_vx = ball["vx"] / sub_steps
-                            step_vy = ball["vy"] / sub_steps
                             last_hitter = "bottom"
-                            sound_event = "paddle"
-                            ai_offsets["bottom"] = random.uniform(-24, 24)
+                            offset = ball["x"] - pad_x
+
+                            # 15초 특수 자석 모드 체크
+                            if now < magnet_active_until["bottom"]:
+                                ball_stuck_to = "bottom"
+                                ball_stuck_offset = offset
+                                bot_release_timer = now + 1.0
+                                sound_event = "catch"
+                                break
+                            else:
+                                ball["y"] = HEIGHT - 22 - ball["radius"]
+                                rebound_angle = (offset / (P_LEN / 2)) * (math.pi / 3.0)
+                                ball["vx"] = BALL_BASE_SPEED * math.sin(rebound_angle)
+                                ball["vy"] = -BALL_BASE_SPEED * math.cos(rebound_angle)
+                                step_vx = ball["vx"] / sub_steps
+                                step_vy = ball["vy"] / sub_steps
+                                sound_event = "paddle"
+                                ai_offsets["bottom"] = random.uniform(-24, 24)
                         elif ball["y"] > HEIGHT + 30:
                             SCORES["bottom"] = max(0, SCORES["bottom"] - 200)
                             sound_event = "lose"
@@ -248,17 +309,24 @@ async def game_loop():
                     if ball["x"] - ball["radius"] <= 22:
                         pad_y = paddle_positions["left"]
                         if pad_y - P_LEN / 2 <= ball["y"] <= pad_y + P_LEN / 2:
-                            ball["x"] = 22 + ball["radius"]
-                            offset = (ball["y"] - pad_y) / (P_LEN / 2)
-                            rebound_angle = offset * (math.pi / 3.0)
-                            
-                            ball["vx"] = BALL_BASE_SPEED * math.cos(rebound_angle)
-                            ball["vy"] = BALL_BASE_SPEED * math.sin(rebound_angle)
-                            step_vx = ball["vx"] / sub_steps
-                            step_vy = ball["vy"] / sub_steps
                             last_hitter = "left"
-                            sound_event = "paddle"
-                            ai_offsets["left"] = random.uniform(-24, 24)
+                            offset = ball["y"] - pad_y
+
+                            if now < magnet_active_until["left"]:
+                                ball_stuck_to = "left"
+                                ball_stuck_offset = offset
+                                bot_release_timer = now + 1.0
+                                sound_event = "catch"
+                                break
+                            else:
+                                ball["x"] = 22 + ball["radius"]
+                                rebound_angle = (offset / (P_LEN / 2)) * (math.pi / 3.0)
+                                ball["vx"] = BALL_BASE_SPEED * math.cos(rebound_angle)
+                                ball["vy"] = BALL_BASE_SPEED * math.sin(rebound_angle)
+                                step_vx = ball["vx"] / sub_steps
+                                step_vy = ball["vy"] / sub_steps
+                                sound_event = "paddle"
+                                ai_offsets["left"] = random.uniform(-24, 24)
                         elif ball["x"] < -30:
                             SCORES["left"] = max(0, SCORES["left"] - 200)
                             sound_event = "lose"
@@ -269,24 +337,31 @@ async def game_loop():
                     if ball["x"] + ball["radius"] >= WIDTH - 22:
                         pad_y = paddle_positions["right"]
                         if pad_y - P_LEN / 2 <= ball["y"] <= pad_y + P_LEN / 2:
-                            ball["x"] = WIDTH - 22 - ball["radius"]
-                            offset = (ball["y"] - pad_y) / (P_LEN / 2)
-                            rebound_angle = offset * (math.pi / 3.0)
-                            
-                            ball["vx"] = -BALL_BASE_SPEED * math.cos(rebound_angle)
-                            ball["vy"] = BALL_BASE_SPEED * math.sin(rebound_angle)
-                            step_vx = ball["vx"] / sub_steps
-                            step_vy = ball["vy"] / sub_steps
                             last_hitter = "right"
-                            sound_event = "paddle"
-                            ai_offsets["right"] = random.uniform(-24, 24)
+                            offset = ball["y"] - pad_y
+
+                            if now < magnet_active_until["right"]:
+                                ball_stuck_to = "right"
+                                ball_stuck_offset = offset
+                                bot_release_timer = now + 1.0
+                                sound_event = "catch"
+                                break
+                            else:
+                                ball["x"] = WIDTH - 22 - ball["radius"]
+                                rebound_angle = (offset / (P_LEN / 2)) * (math.pi / 3.0)
+                                ball["vx"] = -BALL_BASE_SPEED * math.cos(rebound_angle)
+                                ball["vy"] = BALL_BASE_SPEED * math.sin(rebound_angle)
+                                step_vx = ball["vx"] / sub_steps
+                                step_vy = ball["vy"] / sub_steps
+                                sound_event = "paddle"
+                                ai_offsets["right"] = random.uniform(-24, 24)
                         elif ball["x"] > WIDTH + 30:
                             SCORES["right"] = max(0, SCORES["right"] - 200)
                             sound_event = "lose"
                             reset_ball()
                             break
 
-                    # 5. 벽돌 충돌
+                    # 5. 벽돌 충돌 (HP 2 판정 및 15초 특수 버프 부여)
                     r = ball["radius"]
                     for b in bricks:
                         if not b["alive"]:
@@ -299,10 +374,21 @@ async def game_loop():
                         dist_y = ball["y"] - closest_y
 
                         if (dist_x * dist_x + dist_y * dist_y) < (r * r):
-                            b["alive"] = False
-                            sound_event = "brick"
-                            if last_hitter in SCORES:
-                                SCORES[last_hitter] += 100
+                            b["hp"] -= 1
+
+                            if b["hp"] <= 0:
+                                b["alive"] = False
+                                sound_event = "brick"
+                                if last_hitter in SCORES:
+                                    SCORES[last_hitter] += 100
+
+                                # 강화 블록을 최종 파괴한 자에게 15초 특수 아이템 지급
+                                if b["hardened"] and last_hitter:
+                                    magnet_active_until[last_hitter] = now + 15.0
+                                    sound_event = "powerup"
+                            else:
+                                # 1회 피격 (아직 살아있음)
+                                sound_event = "hard_hit"
 
                             overlap_left = (ball["x"] + r) - b["x"]
                             overlap_right = (b["x"] + b["w"]) - (ball["x"] - r)
@@ -329,6 +415,12 @@ async def game_loop():
             waiting_users = [info["name"] for ws, info in CONNECTED_CLIENTS.items() if info.get("state") == "waiting"]
             remaining_pause = max(0.0, pause_until - now)
 
+            # 살아있는 벽돌들의 데이터 (ID, HP, 강화여부)
+            brick_sync_list = [{"id": b["id"], "hp": b["hp"], "hardened": b["hardened"]} for b in bricks if b["alive"]]
+
+            # 패들별 특수 아이템 잔여 시간
+            magnet_remain = {r: max(0.0, magnet_active_until[r] - now) for r in magnet_active_until}
+
             payload = json.dumps({
                 "type": "game_update",
                 "ball": ball,
@@ -338,9 +430,11 @@ async def game_loop():
                 "bot_slots": bot_list,
                 "stage": current_stage,
                 "waiting_users": waiting_users,
-                "alive_brick_ids": [b["id"] for b in bricks if b["alive"]],
+                "bricks_data": brick_sync_list,
                 "pause_sec": remaining_pause,
                 "sound": sound_event,
+                "magnet_remain": magnet_remain,
+                "ball_stuck_to": ball_stuck_to,
                 "orb": {
                     "x": orb_x,
                     "y": orb_y,
@@ -457,6 +551,12 @@ async def handler(websocket):
                     if role and game_started:
                         max_limit = WIDTH - 35 if role == "bottom" else HEIGHT - 35
                         paddle_positions[role] = max(35, min(max_limit, float(data["pos"])))
+
+                elif msg_type == "release_ball":
+                    # 붙어있는 공 터치 발사 요청
+                    role = CONNECTED_CLIENTS[websocket]["role"]
+                    if role and ball_stuck_to == role:
+                        release_stuck_ball(role)
 
             except Exception as parse_err:
                 print(f"[메시지 파싱 방어]: {parse_err}")
