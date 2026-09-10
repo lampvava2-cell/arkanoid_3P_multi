@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>3인 멀티 알카노이드 (3대 특수기능)</title>
+  <title>3인 멀티 알카노이드 (공 렌더링 수정)</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -265,7 +265,7 @@
   </style>
 </head>
 <body>
-  <div id="versionTitle">정통알카노이드 (3대 특수기능 시스템)</div>
+  <div id="versionTitle">정통알카노이드 (공 렌더링 수정)</div>
   <div id="netStatus">🟡 Railway 서버 신호 연결 중...</div>
 
   <div id="scoreboard">
@@ -297,21 +297,22 @@
         <button type="button" onclick="changeName()">확인</button>
       </div>
 
+      <!-- 기본 디폴트 4단계로 설정된 슬라이더 -->
       <div class="sliders-panel">
         <div class="speed-control-box">
           <div class="speed-labels">
             <span>공 속도 설정</span>
-            <span><strong id="speedValue" style="color:#00ffcc;">6</strong> 단계 (1~10)</span>
+            <span><strong id="speedValue" style="color:#00ffcc;">4</strong> 단계 (1~10)</span>
           </div>
-          <input type="range" min="1" max="10" value="6" id="speedSlider" class="speed-slider" oninput="changeSpeed(this.value)">
+          <input type="range" min="1" max="10" value="4" id="speedSlider" class="speed-slider" oninput="changeSpeed(this.value)">
         </div>
 
         <div class="speed-control-box">
           <div class="speed-labels">
             <span>마법구슬 회전 속도</span>
-            <span><strong id="orbSpeedValue" style="color:#ff00ea;">7</strong> 단계 (1~10)</span>
+            <span><strong id="orbSpeedValue" style="color:#ff00ea;">4</strong> 단계 (1~10)</span>
           </div>
-          <input type="range" min="1" max="10" value="7" id="orbSpeedSlider" class="speed-slider" oninput="changeOrbSpeed(this.value)">
+          <input type="range" min="1" max="10" value="4" id="orbSpeedSlider" class="speed-slider" oninput="changeOrbSpeed(this.value)">
         </div>
       </div>
 
@@ -382,7 +383,6 @@
         osc.stop(now + 0.09);
       }
       else if (type === "iron_hit") {
-        // 무쇠공 관통 파괴음 (묵직하고 시원한 타격감)
         osc.type = "sawtooth";
         osc.frequency.setValueAtTime(220, now);
         osc.frequency.exponentialRampToValueAtTime(80, now + 0.12);
@@ -491,7 +491,7 @@
 
     let activeBricks = [];
     let balls = [];
-    let ballTrails = []; // 무쇠공 잔상 궤적 저장
+    let ballTrails = [];
     let orbData = null;
     let paddles = { bottom: 250, left: 250, right: 250 };
     let playerNames = { bottom: "BOT", left: "BOT", right: "BOT" };
@@ -746,7 +746,6 @@
       const r = Math.min(w, h) / 2;
       ctx.roundRect(x, y, w, h, r);
 
-      // 기능별 네온 글로우
       if (powerup && powerup.type) {
         ctx.shadowColor = color;
         ctx.shadowBlur = 18;
@@ -781,7 +780,6 @@
       ctx.fillStyle = "#333";
       ctx.fillRect(0, 0, canvas.width, 10);
 
-      // 마법구슬 서클 레일
       if (orbData) {
         ctx.save();
         ctx.beginPath();
@@ -810,7 +808,6 @@
         ctx.restore();
       }
 
-      // 블록 렌더링
       activeBricks.forEach(b => {
         ctx.save();
         if (b.hardened) {
@@ -843,13 +840,12 @@
         ctx.restore();
       });
 
-      // 패들 컬러 결정 (기능별 고유 컬러)
       const getPaddleColor = (role, isBot) => {
         const p = powerupStatus[role];
         if (p && p.type && p.remain > 0) {
-          if (p.type === "CATCH") return "#ffd700";  // 1번: 골드
-          if (p.type === "MULTI") return "#00ffcc";  // 2번: 네온 시안
-          if (p.type === "IRON") return "#a855f7";   // 3번: 일렉트릭 퍼플
+          if (p.type === "CATCH") return "#ffd700";
+          if (p.type === "MULTI") return "#00ffcc";
+          if (p.type === "IRON") return "#a855f7";
         }
         if (isBot) return "#555";
         if (role === "bottom") return "#00ffcc";
@@ -866,15 +862,12 @@
       const isBotRight = botSlots.includes("right");
       drawCurvedPaddle(canvas.width - 20, paddles.right - 35, 10, 70, getPaddleColor("right", isBotRight), playerNames.right, powerupStatus.right);
 
-      // [무쇠공 잔상(Trail) 및 공 렌더링]
-      balls.forEach((ball, idx) => {
+      balls.forEach((ball) => {
         if (ball.is_iron) {
-          // 잔상 좌표 기록
           ballTrails.push({ x: ball.x, y: ball.y, alpha: 0.65 });
         }
       });
 
-      // 잔상 서서히 페이드아웃 및 렌더링
       for (let i = ballTrails.length - 1; i >= 0; i--) {
         const t = ballTrails[i];
         ctx.beginPath();
@@ -891,14 +884,13 @@
         }
       }
 
-      // 공 본체 렌더링
+      // 공 렌더링 검증 및 강제 보정 출력
       balls.forEach((ball, idx) => {
         ctx.beginPath();
-        ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
+        ctx.arc(ball.x, ball.y, ball.radius || 8, 0, Math.PI * 2);
 
         if (ball.is_iron) {
-          // 3번: 시커멓고 반짝이는 무쇠공
-          const ironGrad = ctx.createRadialGradient(ball.x - 3, ball.y - 3, 1, ball.x, ball.y, ball.radius);
+          const ironGrad = ctx.createRadialGradient(ball.x - 3, ball.y - 3, 1, ball.x, ball.y, ball.radius || 8);
           ironGrad.addColorStop(0, "#ffffff");
           ironGrad.addColorStop(0.25, "#888888");
           ironGrad.addColorStop(0.75, "#18181b");
@@ -907,18 +899,15 @@
           ctx.shadowColor = "#c084fc";
           ctx.shadowBlur = 14;
         } else if (ballStuckTo && idx === 0) {
-          // 자석 대기 중
           ctx.fillStyle = "#ffea00";
           ctx.shadowColor = "#ffaa00";
           ctx.shadowBlur = 18;
         } else if (orbData && orbData.holding && idx === 0) {
-          // 구슬에 삼켜진 상태
           ctx.fillStyle = "#ffff55";
           ctx.shadowColor = "#ffea00";
           ctx.shadowBlur = 12;
         } else {
-          // 일반 공 / 멀티볼
-          ctx.fillStyle = "#fff";
+          ctx.fillStyle = "#ffffff";
           ctx.shadowColor = "#00d2ff";
           ctx.shadowBlur = 10;
         }
