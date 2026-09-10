@@ -10,7 +10,7 @@ import websockets
 WIDTH = 500
 HEIGHT = 500
 
-VERSION_TITLE = "무수직반사_스코어버전11 (Huge Rail & Sound System)"
+VERSION_TITLE = "정통알카노이드_각도복원_스코어버전12 (Classic Paddle Angle & 10% Slower)"
 
 SLOTS = {"bottom": None, "left": None, "right": None}
 PLAYER_NAMES = {"bottom": "BOT", "left": "BOT", "right": "BOT"}
@@ -29,23 +29,23 @@ paddle_positions = {
     "right": HEIGHT / 2
 }
 
-BALL_BASE_SPEED = 6.8
+# [공 속도 10% 감속: 6.8 -> 6.12]
+BALL_BASE_SPEED = 6.12
 ball = {
     "x": WIDTH / 2,
     "y": HEIGHT / 2 + 100,
-    "vx": 4.5,
-    "vy": -4.5,
+    "vx": 4.0,
+    "vy": -4.0,
     "radius": 8
 }
 
 bricks = []
 
-# [초대형 고정 원형 레일 및 마법구슬 설정]
-# 중심 (250, 250), 반지름 205 (패들 바로 앞인 22px~25px 지점을 아슬아슬하게 통과)
+# 초대형 고정 원형 레일 및 마법구슬
 orb = {
     "angle": 0.0,
-    "speed": 0.048,      # 궤도 공전 속도
-    "radius": 13,        # 구슬 피격 판정 반지름
+    "speed": 0.048,
+    "radius": 13,
     "cx": 250,
     "cy": 250,
     "rail_r": 205
@@ -89,7 +89,7 @@ def reset_ball():
 bricks = generate_stage(current_stage)
 
 def update_ai():
-    ai_speed = 6.2
+    ai_speed = 5.6  # 공 속도 감속에 맞춰 AI 추적 속도도 부드럽게 조정
     if SLOTS["bottom"] is None:
         tx = ball["x"]
         cx = paddle_positions["bottom"]
@@ -131,19 +131,6 @@ async def broadcast_lobby():
         except Exception:
             pass
 
-def enforce_non_vertical(vx, vy, base_dir="y"):
-    min_component = 2.4
-    if base_dir == "y":
-        if abs(vx) < min_component:
-            vx = min_component if vx >= 0 else -min_component
-    else:
-        if abs(vy) < min_component:
-            vy = min_component if vy >= 0 else -min_component
-
-    current_speed = math.hypot(vx, vy)
-    scale = BALL_BASE_SPEED / current_speed
-    return vx * scale, vy * scale
-
 async def game_loop():
     global game_started, current_stage, bricks, ball, last_hitter, pause_until, orb
     P_LEN = 70
@@ -154,7 +141,6 @@ async def game_loop():
         sound_event = None
 
         if game_started:
-            # 마법구슬 공전 회전
             orb["angle"] = (orb["angle"] + orb["speed"]) % (2 * math.pi)
             orb_x = orb["cx"] + orb["rail_r"] * math.cos(orb["angle"])
             orb_y = orb["cy"] + orb["rail_r"] * math.sin(orb["angle"])
@@ -170,19 +156,15 @@ async def game_loop():
                     ball["x"] += step_vx
                     ball["y"] += step_vy
 
-                    # [핵심] 마법구슬 충돌: 안/밖 상관없이 원형 서클 내부 방향으로 강력 토스
+                    # 마법구슬 충돌: 서클 중심 내부로 랜덤 토스
                     d_orb = math.hypot(ball["x"] - orb_x, ball["y"] - orb_y)
                     if d_orb <= (ball["radius"] + orb["radius"]):
-                        # 구슬에서 서클 정중앙(250, 250)을 바라보는 각도 계산
                         center_dir = math.atan2(orb["cy"] - orb_y, orb["cx"] - orb_x)
-                        # 중심 방향을 기준으로 ±45도(π/4) 범위 내 랜덤 반사각
                         toss_angle = center_dir + random.uniform(-math.pi / 4, math.pi / 4)
                         
-                        ball["vx"] = BALL_BASE_SPEED * 1.2 * math.cos(toss_angle)
-                        ball["vy"] = BALL_BASE_SPEED * 1.2 * math.sin(toss_angle)
-                        ball["vx"], ball["vy"] = enforce_non_vertical(ball["vx"], ball["vy"], "y")
+                        ball["vx"] = BALL_BASE_SPEED * 1.15 * math.cos(toss_angle)
+                        ball["vy"] = BALL_BASE_SPEED * 1.15 * math.sin(toss_angle)
                         
-                        # 중심 방향으로 공을 밀어내어 연쇄 충돌 방지
                         push_dist = ball["radius"] + orb["radius"] + 3.0
                         ball["x"] = orb_x + push_dist * math.cos(center_dir)
                         ball["y"] = orb_y + push_dist * math.sin(center_dir)
@@ -192,28 +174,24 @@ async def game_loop():
                         sound_event = "orb"
                         break
 
-                    # 1. 상단 천장
+                    # 1. 상단 천장 반사
                     if ball["y"] - ball["radius"] <= 10:
                         ball["y"] = 10 + ball["radius"]
                         ball["vy"] = abs(ball["vy"])
-                        ball["vx"], ball["vy"] = enforce_non_vertical(ball["vx"], ball["vy"], "y")
-                        step_vx = ball["vx"] / sub_steps
                         step_vy = ball["vy"] / sub_steps
                         sound_event = "wall"
 
-                    # 2. 하단 패들
+                    # 2. 하단 패들: [알카노이드 정석 반사각]
+                    # 중앙 피격 시 수직 90도 (rebound_angle = 0), 끝으로 갈수록 최대 60도 (π/3)
                     if ball["y"] + ball["radius"] >= HEIGHT - 22:
                         pad_x = paddle_positions["bottom"]
                         if pad_x - P_LEN / 2 <= ball["x"] <= pad_x + P_LEN / 2:
                             ball["y"] = HEIGHT - 22 - ball["radius"]
-                            offset = (ball["x"] - pad_x) / (P_LEN / 2)
-                            if abs(offset) < 0.22:
-                                offset = 0.35 if offset >= 0 else -0.35
-
-                            rebound_angle = offset * (math.pi / 2.8)
+                            offset = (ball["x"] - pad_x) / (P_LEN / 2)  # -1.0 ~ +1.0
+                            rebound_angle = offset * (math.pi / 3.0)    # 최대 ±60도
+                            
                             ball["vx"] = BALL_BASE_SPEED * math.sin(rebound_angle)
                             ball["vy"] = -BALL_BASE_SPEED * math.cos(rebound_angle)
-                            ball["vx"], ball["vy"] = enforce_non_vertical(ball["vx"], ball["vy"], "y")
                             step_vx = ball["vx"] / sub_steps
                             step_vy = ball["vy"] / sub_steps
                             last_hitter = "bottom"
@@ -224,20 +202,17 @@ async def game_loop():
                             reset_ball()
                             break
 
-                    # 3. 좌측 패들
+                    # 3. 좌측 패들: [알카노이드 정석 반사각]
+                    # 중앙 피격 시 수평 (rebound_angle = 0), 끝으로 갈수록 최대 ±60도
                     if ball["x"] - ball["radius"] <= 22:
                         pad_y = paddle_positions["left"]
                         if pad_y - P_LEN / 2 <= ball["y"] <= pad_y + P_LEN / 2:
                             ball["x"] = 22 + ball["radius"]
                             offset = (ball["y"] - pad_y) / (P_LEN / 2)
-                            if abs(offset) < 0.22:
-                                offset = -0.35
-
-                            adj_offset = max(-1.0, min(1.0, offset - 0.2))
-                            rebound_angle = adj_offset * (math.pi / 2.9)
+                            rebound_angle = offset * (math.pi / 3.0)
+                            
                             ball["vx"] = BALL_BASE_SPEED * math.cos(rebound_angle)
                             ball["vy"] = BALL_BASE_SPEED * math.sin(rebound_angle)
-                            ball["vx"], ball["vy"] = enforce_non_vertical(ball["vx"], ball["vy"], "x")
                             step_vx = ball["vx"] / sub_steps
                             step_vy = ball["vy"] / sub_steps
                             last_hitter = "left"
@@ -248,20 +223,16 @@ async def game_loop():
                             reset_ball()
                             break
 
-                    # 4. 우측 패들
+                    # 4. 우측 패들: [알카노이드 정석 반사각]
                     if ball["x"] + ball["radius"] >= WIDTH - 22:
                         pad_y = paddle_positions["right"]
                         if pad_y - P_LEN / 2 <= ball["y"] <= pad_y + P_LEN / 2:
                             ball["x"] = WIDTH - 22 - ball["radius"]
                             offset = (ball["y"] - pad_y) / (P_LEN / 2)
-                            if abs(offset) < 0.22:
-                                offset = -0.35
-
-                            adj_offset = max(-1.0, min(1.0, offset - 0.2))
-                            rebound_angle = adj_offset * (math.pi / 2.9)
+                            rebound_angle = offset * (math.pi / 3.0)
+                            
                             ball["vx"] = -BALL_BASE_SPEED * math.cos(rebound_angle)
                             ball["vy"] = BALL_BASE_SPEED * math.sin(rebound_angle)
-                            ball["vx"], ball["vy"] = enforce_non_vertical(ball["vx"], ball["vy"], "x")
                             step_vx = ball["vx"] / sub_steps
                             step_vy = ball["vy"] / sub_steps
                             last_hitter = "right"
@@ -272,7 +243,7 @@ async def game_loop():
                             reset_ball()
                             break
 
-                    # 5. 벽돌 충돌
+                    # 5. 벽돌 충돌 판정
                     r = ball["radius"]
                     for b in bricks:
                         if not b["alive"]:
