@@ -3,11 +3,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>3인 멀티 알카노이드 (정사각형)</title>
+  <title>3인 멀티 알카노이드 (정사각형 & 대기실)</title>
   <style>
+    * { box-sizing: border-box; }
     body {
       margin: 0;
-      background: #0d0e15;
+      padding: 0;
+      background: #0b0c12;
       color: #fff;
       display: flex;
       flex-direction: column;
@@ -25,54 +27,99 @@
       margin-bottom: 8px;
       letter-spacing: 0.5px;
     }
-    /* 모바일 화면 너비에 맞춘 완벽한 정사각형 컨테이너 */
+    /* 대기실 접속자 알림 배너 (플레이어 화면용) */
+    #waitingNoticeBanner {
+      display: none;
+      background: rgba(255, 170, 0, 0.25);
+      border: 1px solid #ffaa00;
+      color: #ffcc00;
+      font-size: 12px;
+      padding: 5px 12px;
+      border-radius: 20px;
+      margin-bottom: 6px;
+      animation: pulse 1.5s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 0.8; }
+      50% { opacity: 1; transform: scale(1.02); }
+    }
+    /* [핵심] 완전 1:1 정사각형 캔버스 컨테이너 */
     #container {
       position: relative;
-      width: 92vw;
-      height: 92vw;
-      max-width: 500px;
-      max-height: 500px;
-      border: 2px solid #333;
-      box-shadow: 0 0 25px rgba(0,255,255,0.15);
-      background: #151722;
+      width: min(92vw, 480px);
+      height: min(92vw, 480px);
+      aspect-ratio: 1 / 1;
+      border: 2px solid #334;
+      box-shadow: 0 0 25px rgba(0,255,255,0.18);
+      background: #141622;
       border-radius: 12px;
       overflow: hidden;
     }
-    canvas { width: 100%; height: 100%; display: block; }
+    canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+      aspect-ratio: 1 / 1;
+    }
     
-    #lobbyOverlay {
+    /* 로비 & 대기실 오버레이 공통 */
+    .overlay {
       position: absolute;
       top: 0; left: 0; width: 100%; height: 100%;
-      background: rgba(13, 14, 21, 0.95);
+      background: rgba(11, 12, 18, 0.94);
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
       z-index: 10;
+      padding: 16px;
     }
-    h2 { margin: 0 0 14px 0; color: #fff; font-size: 18px; }
-    #connectionInfo {
-      font-size: 12px;
-      color: #ffaa00;
+    h2 { margin: 0 0 12px 0; color: #fff; font-size: 18px; }
+    
+    /* 닉네임 입력 */
+    .name-box {
+      display: flex;
+      gap: 6px;
+      width: 86%;
       margin-bottom: 12px;
+    }
+    .name-box input {
+      flex: 1;
+      padding: 10px;
+      border-radius: 6px;
+      border: 1px solid #445;
+      background: #1d2030;
+      color: #fff;
+      font-size: 13px;
       text-align: center;
     }
-    .role-grid { display: flex; flex-direction: column; gap: 8px; width: 84%; margin-bottom: 16px; }
+    .name-box button {
+      padding: 0 14px;
+      background: #3a7bd5;
+      border: none;
+      border-radius: 6px;
+      color: #fff;
+      font-weight: bold;
+      font-size: 12px;
+    }
+    
+    .role-grid { display: flex; flex-direction: column; gap: 8px; width: 86%; margin-bottom: 14px; }
     .role-btn {
-      padding: 12px;
-      border: 2px solid #444;
-      background: #202433;
+      padding: 11px 14px;
+      border: 2px solid #3e445b;
+      background: #1d2030;
       color: #fff;
       font-size: 13px;
       font-weight: bold;
       border-radius: 8px;
       display: flex;
       justify-content: space-between;
+      align-items: center;
       outline: none;
     }
-    .role-btn.active { border-color: #00ffcc; background: #123838; color: #00ffcc; }
+    .role-btn.active { border-color: #00ffcc; background: #0f3636; color: #00ffcc; }
     #startBtn {
-      width: 84%;
+      width: 86%;
       padding: 13px;
       background: #00d2ff;
       border: none;
@@ -84,44 +131,73 @@
     }
     #stageBadge {
       position: absolute;
-      top: 15px;
-      left: 15px;
+      top: 12px;
+      left: 12px;
       font-size: 12px;
       color: #ffaa00;
       font-weight: bold;
       display: none;
+      z-index: 5;
     }
-    #guideTip {
-      margin-top: 10px;
-      font-size: 11px;
-      color: #888;
-      text-align: center;
+    
+    /* 3번째 대기자 전용 화면 */
+    #waitingOverlay {
+      display: none;
     }
+    .waiting-spinner {
+      width: 38px;
+      height: 38px;
+      border: 3px solid rgba(0, 255, 204, 0.2);
+      border-top-color: #00ffcc;
+      border-radius: 50%;
+      animation: spin 1s infinite linear;
+      margin-bottom: 16px;
+    }
+    @keyframes spin { 100% { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
-  <div id="versionTitle">정사각형_상대터치버전5 (Square & Relative Touch)</div>
+  <div id="versionTitle">완전정사각_대기실버전6 (True Square & Waiting Room)</div>
+  <div id="waitingNoticeBanner">🔔 대기실에 참가자가 있습니다!</div>
   
   <div id="container">
     <div id="stageBadge">STAGE 1 / 3</div>
     <canvas id="game" width="500" height="500"></canvas>
 
-    <div id="lobbyOverlay">
-      <h2>포지션 선택</h2>
-      <div id="connectionInfo">서버 신호 연결 대기 중...</div>
+    <!-- 1. 기본 로비 (자리 선택) -->
+    <div id="lobbyOverlay" class="overlay">
+      <h2>3인 알카노이드 로비</h2>
+      <div class="name-box">
+        <input type="text" id="nameInput" placeholder="닉네임 입력 (최대 6자)" maxlength="6">
+        <button onclick="changeName()">확인</button>
+      </div>
       <div class="role-grid">
         <button class="role-btn" id="btn-bottom" onclick="selectRole('bottom')">
-          <span>하단 (가로 제어)</span> <span id="label-bottom">BOT</span>
+          <span>하단 (가로)</span> <span id="label-bottom">BOT</span>
         </button>
         <button class="role-btn" id="btn-left" onclick="selectRole('left')">
-          <span>좌측 (세로 제어)</span> <span id="label-left">BOT</span>
+          <span>좌측 (세로)</span> <span id="label-left">BOT</span>
         </button>
         <button class="role-btn" id="btn-right" onclick="selectRole('right')">
-          <span>우측 (세로 제어)</span> <span id="label-right">BOT</span>
+          <span>우측 (세로)</span> <span id="label-right">BOT</span>
         </button>
       </div>
       <button id="startBtn" onclick="requestStart()">GAME START</button>
-      <div id="guideTip">※ 화면 아무 곳이나 드래그해도 패들이 움직입니다 (손가락 가림 방지)</div>
+    </div>
+
+    <!-- 2. 난입자 대기실 화면 (3번째 접속자) -->
+    <div id="waitingOverlay" class="overlay">
+      <div class="waiting-spinner"></div>
+      <h2 style="color:#ffcc00; margin-bottom:8px;">게임이 이미 진행 중입니다</h2>
+      <p style="font-size:13px; color:#aaa; text-align:center; line-height:1.5; margin:0 0 16px 0;">
+        현재 2명의 플레이어가 대결 중입니다.<br>
+        <strong>[대기실]</strong>에서 잠시 관전하며 대기해 주세요.<br>
+        다음 게임 시작 시 바로 참여 가능합니다!
+      </p>
+      <div class="name-box" style="width:75%;">
+        <input type="text" id="waitingNameInput" placeholder="내 닉네임 설정" maxlength="6">
+        <button onclick="changeWaitingName()">등록</button>
+      </div>
     </div>
   </div>
 
@@ -130,31 +206,33 @@
     const ctx = canvas.getContext("2d");
     const versionTitle = document.getElementById("versionTitle");
     const lobbyOverlay = document.getElementById("lobbyOverlay");
+    const waitingOverlay = document.getElementById("waitingOverlay");
+    const waitingNoticeBanner = document.getElementById("waitingNoticeBanner");
     const stageBadge = document.getElementById("stageBadge");
-    const connInfo = document.getElementById("connectionInfo");
+    const nameInput = document.getElementById("nameInput");
+    const waitingNameInput = document.getElementById("waitingNameInput");
 
     const WS_URL = "wss://arkanoid-3p-multi.onrender.com";
     let ws = null;
     let myRole = null;
+    let myName = "플레이어" + Math.floor(Math.random() * 900 + 100);
+    nameInput.value = myName;
+
     let bricks = [];
     let deadBrickIds = new Set();
     let ball = { x: 250, y: 350, radius: 8 };
     let paddles = { bottom: 250, left: 250, right: 250 };
+    let playerNames = { bottom: "BOT", left: "BOT", right: "BOT" };
     let botSlots = ["bottom", "left", "right"];
 
-    // 상대 드래그 터치 처리를 위한 마지막 터치 좌표 저장
     let lastTouchX = null;
     let lastTouchY = null;
 
     function connectSocket() {
-      connInfo.innerText = "서버 연결 시도 중...";
-      connInfo.style.color = "#ffaa00";
-
       ws = new WebSocket(WS_URL);
 
       ws.onopen = () => {
-        connInfo.innerText = "서버 연결 완료! 자리를 선택하세요.";
-        connInfo.style.color = "#00ffcc";
+        ws.send(JSON.stringify({ type: "set_name", name: myName }));
       };
 
       ws.onmessage = (e) => {
@@ -163,42 +241,82 @@
         if (msg.type === "lobby_state") {
           versionTitle.innerText = `[ ${msg.title} ]`;
           updateLobbyUI(msg.slots);
-        } else if (msg.type === "game_start") {
+
+          // 대기자 알림 배너 갱신
+          if (msg.waiting_users && msg.waiting_users.length > 0 && myRole) {
+            waitingNoticeBanner.style.display = "block";
+            waitingNoticeBanner.innerText = `🔔 '${msg.waiting_users.join(", ")}' 님이 대기실에서 기다리고 있습니다!`;
+          } else {
+            waitingNoticeBanner.style.display = "none";
+          }
+        } 
+        else if (msg.type === "waiting_room_notice") {
+          // 3번째로 뒤늦게 접속한 유저를 위한 대기실 모드 가동
           lobbyOverlay.style.display = "none";
+          waitingOverlay.style.display = "flex";
+          stageBadge.style.display = "block";
+          stageBadge.innerText = `STAGE ${msg.stage} / 3 (관전 대기 중)`;
+          bricks = msg.bricks;
+        } 
+        else if (msg.type === "game_start") {
+          if (myRole) {
+            lobbyOverlay.style.display = "none";
+            waitingOverlay.style.display = "none";
+          }
           stageBadge.style.display = "block";
           bricks = msg.bricks;
           deadBrickIds.clear();
-        } else if (msg.type === "game_update") {
+        } 
+        else if (msg.type === "game_update") {
           ball = msg.ball;
-          // 내 패들은 부드러운 로컬 조작을 위해 서버 덮어쓰기 대신 다른 플레이어만 갱신
           for (let r of ["bottom", "left", "right"]) {
             if (r !== myRole) {
               paddles[r] = msg.paddles[r];
             }
           }
+          playerNames = msg.names || playerNames;
           botSlots = msg.bot_slots || [];
           stageBadge.innerText = `STAGE ${msg.stage} / 3`;
           msg.bricks.forEach(id => deadBrickIds.add(id));
+
+          // 인게임 중 대기자 표시
+          if (msg.waiting_users && msg.waiting_users.length > 0 && myRole) {
+            waitingNoticeBanner.style.display = "block";
+            waitingNoticeBanner.innerText = `🔔 '${msg.waiting_users.join(", ")}' 님이 대기실에서 대기 중!`;
+          } else {
+            waitingNoticeBanner.style.display = "none";
+          }
           render();
         }
       };
 
       ws.onclose = () => {
-        connInfo.innerText = "서버 연결 끊김. 3초 후 재접속 시도...";
-        connInfo.style.color = "#ff4444";
         setTimeout(connectSocket, 3000);
-      };
-
-      ws.onerror = () => {
-        connInfo.innerText = "서버 연결 대기 중...";
       };
     }
 
     connectSocket();
 
+    function changeName() {
+      if (!nameInput.value.trim()) return;
+      myName = nameInput.value.trim();
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "set_name", name: myName }));
+      }
+    }
+
+    function changeWaitingName() {
+      if (!waitingNameInput.value.trim()) return;
+      myName = waitingNameInput.value.trim();
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "set_name", name: myName }));
+      }
+    }
+
     function selectRole(role) {
       if (!ws || ws.readyState !== WebSocket.OPEN) return;
       myRole = role;
+      changeName();
       ws.send(JSON.stringify({ type: "select_role", role: role }));
     }
 
@@ -211,15 +329,20 @@
       ["bottom", "left", "right"].forEach(r => {
         const btn = document.getElementById(`btn-${r}`);
         const label = document.getElementById(`label-${r}`);
-        const isUser = slots[r] === "USER";
+        const slotData = slots[r];
         
         btn.classList.toggle("active", myRole === r);
-        label.innerText = isUser ? (myRole === r ? "YOU" : "READY") : "BOT";
-        label.style.color = isUser ? "#00ffcc" : "#888";
+        if (slotData.type === "USER") {
+          label.innerText = (myRole === r ? "[나] " : "") + slotData.name;
+          label.style.color = "#00ffcc";
+        } else {
+          label.innerText = "BOT (컴퓨터)";
+          label.style.color = "#888";
+        }
       });
     }
 
-    // [손가락 가림 방지] 상대적 드래그(Relative Drag) 터치 핸들러
+    // 상대 터치 드래그 (손가락 가림 방지)
     canvas.addEventListener("touchstart", (e) => {
       const touch = e.touches[0];
       lastTouchX = touch.clientX;
@@ -236,7 +359,6 @@
       lastTouchX = touch.clientX;
       lastTouchY = touch.clientY;
 
-      // 캔버스 크기 대비 비율 계산
       const rect = canvas.getBoundingClientRect();
       const scale = canvas.width / rect.width;
 
@@ -257,19 +379,30 @@
       lastTouchY = null;
     });
 
-    function drawCurvedPaddle(x, y, w, h, color) {
+    function drawCurvedPaddle(x, y, w, h, color, labelText) {
       ctx.fillStyle = color;
       ctx.beginPath();
       const r = Math.min(w, h) / 2;
       ctx.roundRect(x, y, w, h, r);
       ctx.fill();
       ctx.closePath();
+
+      // 패들 옆 닉네임 라벨링
+      ctx.fillStyle = "#fff";
+      ctx.font = "bold 11px sans-serif";
+      if (w > h) {
+        ctx.textAlign = "center";
+        ctx.fillText(labelText, x + w / 2, y - 6);
+      } else {
+        ctx.textAlign = x < 50 ? "left" : "right";
+        ctx.fillText(labelText, x < 50 ? x + 16 : x - 6, y + h / 2 + 4);
+      }
     }
 
     function render() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      // 상단 가이드 벽
+      // 상단 천장
       ctx.fillStyle = "#333";
       ctx.fillRect(0, 0, canvas.width, 10);
 
@@ -283,15 +416,15 @@
         }
       });
 
-      // 패들 3종 (길이 70 균일)
+      // 패들 3종
       const isBotBottom = botSlots.includes("bottom");
-      drawCurvedPaddle(paddles.bottom - 35, canvas.height - 20, 70, 10, isBotBottom ? "#555" : "#00ffcc");
+      drawCurvedPaddle(paddles.bottom - 35, canvas.height - 20, 70, 10, isBotBottom ? "#555" : "#00ffcc", playerNames.bottom);
 
       const isBotLeft = botSlots.includes("left");
-      drawCurvedPaddle(10, paddles.left - 35, 10, 70, isBotLeft ? "#555" : "#ff007f");
+      drawCurvedPaddle(10, paddles.left - 35, 10, 70, isBotLeft ? "#555" : "#ff007f", playerNames.left);
 
       const isBotRight = botSlots.includes("right");
-      drawCurvedPaddle(canvas.width - 20, paddles.right - 35, 10, 70, isBotRight ? "#555" : "#ffaa00");
+      drawCurvedPaddle(canvas.width - 20, paddles.right - 35, 10, 70, isBotRight ? "#555" : "#ffaa00", playerNames.right);
 
       // 공
       ctx.beginPath();
