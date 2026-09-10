@@ -10,7 +10,7 @@ import websockets
 WIDTH = 500
 HEIGHT = 500
 
-VERSION_TITLE = "정통알카노이드_포획회전_속도조절_버전14"
+VERSION_TITLE = "정통알카노이드_게이지추가_버전15 (Orb Charge Gauge)"
 
 SLOTS = {"bottom": None, "left": None, "right": None}
 PLAYER_NAMES = {"bottom": "BOT", "left": "BOT", "right": "BOT"}
@@ -35,7 +35,6 @@ ai_offsets = {
     "right": 0.0
 }
 
-# [공 속도 레벨 시스템: 기본 6레벨 = 6.12]
 BALL_SPEED_LEVEL = 6
 BALL_BASE_SPEED = BALL_SPEED_LEVEL * 1.02
 
@@ -58,7 +57,6 @@ orb = {
     "cy": 250,
     "rail_r": 205,
     "holding_ball": False,
-    "hold_start_angle": 0.0,
     "hold_rotated": 0.0
 }
 
@@ -97,6 +95,7 @@ def reset_ball():
     ball["vy"] = -abs(BALL_BASE_SPEED * math.cos(angle))
     last_hitter = None
     orb["holding_ball"] = False
+    orb["hold_rotated"] = 0.0
     ai_offsets = {r: random.uniform(-24, 24) for r in ai_offsets}
 
 bricks = generate_stage(current_stage)
@@ -159,15 +158,18 @@ async def game_loop():
             orb_x = orb["cx"] + orb["rail_r"] * math.cos(orb["angle"])
             orb_y = orb["cy"] + orb["rail_r"] * math.sin(orb["angle"])
 
-            # [마법구슬 포획 1회전 로직]
+            # 마법구슬 포획 1바퀴 회전 및 진행률 계산
+            charge_progress = 0.0
             if orb["holding_ball"]:
                 orb["hold_rotated"] += orb["speed"]
                 ball["x"] = orb_x
                 ball["y"] = orb_y
+                # 0.0 ~ 1.0 (0% ~ 100%)
+                charge_progress = min(1.0, orb["hold_rotated"] / (2 * math.pi))
 
-                # 한 바퀴(2 * PI) 완주 시 내부로 발사
                 if orb["hold_rotated"] >= (2 * math.pi):
                     orb["holding_ball"] = False
+                    orb["hold_rotated"] = 0.0
                     center_dir = math.atan2(orb["cy"] - orb_y, orb["cx"] - orb_x)
                     toss_angle = center_dir + random.uniform(-math.pi / 4, math.pi / 4)
 
@@ -179,6 +181,7 @@ async def game_loop():
                     ball["y"] = orb_y + push_dist * math.sin(center_dir)
 
                     sound_event = "orb"
+                    charge_progress = 1.0
                     ai_offsets = {r: random.uniform(-24, 24) for r in ai_offsets}
 
             elif not is_paused:
@@ -192,7 +195,7 @@ async def game_loop():
                     ball["x"] += step_vx
                     ball["y"] += step_vy
 
-                    # 마법구슬 피격 -> 공 포획 상태 진입
+                    # 구슬 접촉 -> 공 삼키기(포획) 시작
                     d_orb = math.hypot(ball["x"] - orb_x, ball["y"] - orb_y)
                     if d_orb <= (ball["radius"] + orb["radius"]):
                         orb["holding_ball"] = True
@@ -202,7 +205,7 @@ async def game_loop():
                         sound_event = "catch"
                         break
 
-                    # 1. 상단 천장
+                    # 1. 상단 벽
                     if ball["y"] - ball["radius"] <= 10:
                         ball["y"] = 10 + ball["radius"]
                         ball["vy"] = abs(ball["vy"])
@@ -333,7 +336,8 @@ async def game_loop():
                     "rail_cx": orb["cx"],
                     "rail_cy": orb["cy"],
                     "rail_r": orb["rail_r"],
-                    "holding": orb["holding_ball"]
+                    "holding": orb["holding_ball"],
+                    "progress": charge_progress
                 }
             })
             for ws in list(CONNECTED_CLIENTS.keys()):
