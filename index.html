@@ -36,7 +36,8 @@
     const statusText = document.getElementById("status");
 
     // 서버 주소 (추후 배포 주소로 갱신 예정)
-    const wsUrl = "ws://" + window.location.hostname + ":8765";
+    const wsUrl = "wss://arkanoid-3p-multi.onrender.com";
+
     const ws = new WebSocket(wsUrl);
 
     let myRole = null;
