@@ -20,7 +20,7 @@ paddle_positions = {
     "right": HEIGHT / 2
 }
 
-# 공 기본 상태
+# 공 기본 상태 (속도 상향: 5.5)
 ball = {
     "x": WIDTH / 2,
     "y": HEIGHT / 2 + 100,
@@ -131,7 +131,7 @@ async def game_loop():
                 ball["vx"] = offset * 6.0
             elif ball["y"] > HEIGHT + 25:
                 ball["x"], ball["y"] = WIDTH / 2, HEIGHT / 2 + 80
-                ball["vx"], ball["vy"] = random.choice([-3.0, 3.0]), -3.2
+                ball["vx"], ball["vy"] = random.choice([-5.5, 5.5]), -5.5
 
         # 3. 좌측 패들 충돌 판정
         if ball["x"] - ball["radius"] <= 22:
@@ -142,7 +142,7 @@ async def game_loop():
                 ball["vy"] = offset * 6.0
             elif ball["x"] < -25:
                 ball["x"], ball["y"] = WIDTH / 2, HEIGHT / 2
-                ball["vx"], ball["vy"] = 3.2, random.choice([-3.0, 3.0])
+                ball["vx"], ball["vy"] = 5.5, random.choice([-5.5, 5.5])
 
         # 4. 우측 패들 충돌 판정
         if ball["x"] + ball["radius"] >= WIDTH - 22:
@@ -150,10 +150,10 @@ async def game_loop():
             if pad_y - PADDLE_LENGTH / 2 <= ball["y"] <= pad_y + PADDLE_LENGTH / 2:
                 ball["vx"] = -abs(ball["vx"])
                 offset = (ball["y"] - pad_y) / (PADDLE_LENGTH / 2)
-                ball["vy"] = offset * 4.2
+                ball["vy"] = offset * 6.0
             elif ball["x"] > WIDTH + 25:
                 ball["x"], ball["y"] = WIDTH / 2, HEIGHT / 2
-                ball["vx"], ball["vy"] = -3.2, random.choice([-3.0, 3.0])
+                ball["vx"], ball["vy"] = -5.5, random.choice([-5.5, 5.5])
 
         # 5. 벽돌 충돌 및 파괴
         for b in bricks:
