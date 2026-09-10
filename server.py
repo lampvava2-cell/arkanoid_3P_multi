@@ -10,7 +10,7 @@ import websockets
 WIDTH = 500
 HEIGHT = 500
 
-VERSION_TITLE = "정통알카노이드_3종특수기능_버전20 (Catch, Multi, IronBall)"
+VERSION_TITLE = "정통알카노이드_공렌더링오류수정_버전21"
 
 SLOTS = {"bottom": None, "left": None, "right": None}
 PLAYER_NAMES = {"bottom": "BOT", "left": "BOT", "right": "BOT"}
@@ -35,8 +35,6 @@ ai_offsets = {
     "right": 0.0
 }
 
-# [특수 기능 버프 상태]
-# type: None | "CATCH" | "MULTI" | "IRON"
 player_powerups = {
     "bottom": {"type": None, "until": 0.0},
     "left": {"type": None, "until": 0.0},
@@ -47,14 +45,13 @@ ball_stuck_to = None
 ball_stuck_offset = 0.0
 bot_release_timer = 0.0
 
-BALL_SPEED_LEVEL = 6
+# [기본 공 속도 및 마법구슬 속도 디폴트를 4로 설정]
+BALL_SPEED_LEVEL = 4
 BALL_BASE_SPEED = BALL_SPEED_LEVEL * 1.02
 
-ORB_SPEED_LEVEL = 7
+ORB_SPEED_LEVEL = 4
 ORB_BASE_SPEED = (ORB_SPEED_LEVEL / 7.0) * 0.048
 
-# 공 리스트 (멀티볼 지원)
-# ball 객체: { id, x, y, vx, vy, radius, is_iron }
 balls = []
 ball_id_seq = 1
 
@@ -100,12 +97,10 @@ def reset_all_balls():
     ai_offsets = {r: random.uniform(-24, 24) for r in ai_offsets}
 
 def spawn_multiballs(source_ball):
-    """멀티볼 발동: 기존 공을 기준으로 2개의 공 추가 생성 (총 3개)"""
     global balls
     base_angle = math.atan2(source_ball["vy"], source_ball["vx"])
     spd = BALL_BASE_SPEED
 
-    # 각도 ±30도로 분기
     b1 = create_ball(source_ball["x"], source_ball["y"], spd * math.cos(base_angle - 0.5), spd * math.sin(base_angle - 0.5), source_ball.get("is_iron", False))
     b2 = create_ball(source_ball["x"], source_ball["y"], spd * math.cos(base_angle + 0.5), spd * math.sin(base_angle + 0.5), source_ball.get("is_iron", False))
     balls.extend([b1, b2])
@@ -233,13 +228,10 @@ async def game_loop():
         sound_event = None
 
         if game_started:
-            # 특수 버프 만료 검사
             for r in ["bottom", "left", "right"]:
                 if player_powerups[r]["type"] and now >= player_powerups[r]["until"]:
-                    # 멀티볼 만료 시 공 1개로 복구
                     if player_powerups[r]["type"] == "MULTI" and len(balls) > 1:
                         balls = [balls[0]]
-                    # 무쇠공 만료 시 일반공 복구
                     if player_powerups[r]["type"] == "IRON":
                         for b in balls:
                             b["is_iron"] = False
@@ -251,7 +243,6 @@ async def game_loop():
 
             charge_progress = 0.0
 
-            # 1. 마법구슬 공 포획 상태 처리
             if orb["holding_ball"]:
                 orb["hold_rotated"] += orb["speed"]
                 if balls:
@@ -276,7 +267,6 @@ async def game_loop():
                     charge_progress = 1.0
                     ai_offsets = {r: random.uniform(-24, 24) for r in ai_offsets}
 
-            # 2. 패들에 공이 붙어있는 경우 (자석 기능)
             elif ball_stuck_to and balls:
                 main_ball = balls[0]
                 if ball_stuck_to == "bottom":
@@ -307,7 +297,6 @@ async def game_loop():
                         ball["x"] += step_vx
                         ball["y"] += step_vy
 
-                        # 마법구슬 판정 (30% 겹침)
                         overlap_threshold = (ball["radius"] + orb["radius"]) * 0.70
                         d_orb = math.hypot(ball["x"] - orb_x, ball["y"] - orb_y)
                         if d_orb <= overlap_threshold and not orb["holding_ball"]:
@@ -319,21 +308,18 @@ async def game_loop():
                             sound_event = "restore" if revived_count > 0 else "catch"
                             break
 
-                        # 상단 벽 충돌
                         if ball["y"] - ball["radius"] <= 10:
                             ball["y"] = 10 + ball["radius"]
                             ball["vy"] = abs(ball["vy"])
                             step_vy = ball["vy"] / sub_steps
                             sound_event = "wall"
 
-                        # 하단 패들
                         if ball["y"] + ball["radius"] >= HEIGHT - 22:
                             pad_x = paddle_positions["bottom"]
                             if pad_x - P_LEN / 2 <= ball["x"] <= pad_x + P_LEN / 2:
                                 last_hitter = "bottom"
                                 offset = ball["x"] - pad_x
 
-                                # 1번 특수기능(CATCH) 활성화 중일 때
                                 if player_powerups["bottom"]["type"] == "CATCH" and now < player_powerups["bottom"]["until"]:
                                     ball_stuck_to = "bottom"
                                     ball_stuck_offset = offset
@@ -353,7 +339,6 @@ async def game_loop():
                                 dead_balls.append(ball)
                                 break
 
-                        # 좌측 패들
                         if ball["x"] - ball["radius"] <= 22:
                             pad_y = paddle_positions["left"]
                             if pad_y - P_LEN / 2 <= ball["y"] <= pad_y + P_LEN / 2:
@@ -379,7 +364,6 @@ async def game_loop():
                                 dead_balls.append(ball)
                                 break
 
-                        # 우측 패들
                         if ball["x"] + ball["radius"] >= WIDTH - 22:
                             pad_y = paddle_positions["right"]
                             if pad_y - P_LEN / 2 <= ball["y"] <= pad_y + P_LEN / 2:
@@ -405,7 +389,6 @@ async def game_loop():
                                 dead_balls.append(ball)
                                 break
 
-                        # 블록 충돌
                         r = ball["radius"]
                         is_iron = ball.get("is_iron", False)
 
@@ -420,7 +403,6 @@ async def game_loop():
                             dist_y = ball["y"] - closest_y
 
                             if (dist_x * dist_x + dist_y * dist_y) < (r * r):
-                                # 3번 특수기능: 무쇠공은 스치기만 해도 원샷 관통 파괴!
                                 if is_iron:
                                     b["hp"] = 0
                                     b["alive"] = False
@@ -428,7 +410,6 @@ async def game_loop():
                                     if last_hitter in SCORES:
                                         SCORES[last_hitter] += 100
                                 else:
-                                    # 일반 타격 판정
                                     b["hp"] -= 1
                                     if b["hp"] <= 0:
                                         b["alive"] = False
@@ -436,7 +417,6 @@ async def game_loop():
                                         if last_hitter in SCORES:
                                             SCORES[last_hitter] += 100
 
-                                        # 부활 블록 격파 시 3가지 특수 기능 중 1개 랜덤 지급 (15초)
                                         if b["hardened"] and last_hitter:
                                             chosen_skill = random.choice(["CATCH", "MULTI", "IRON"])
                                             player_powerups[last_hitter] = {
@@ -453,7 +433,6 @@ async def game_loop():
                                     else:
                                         sound_event = "hard_hit"
 
-                                    # 일반공은 충돌 반사 (무쇠공은 반사 없이 직진 관통)
                                     overlap_left = (ball["x"] + r) - b["x"]
                                     overlap_right = (b["x"] + b["w"]) - (ball["x"] - r)
                                     overlap_top = (ball["y"] + r) - b["y"]
@@ -469,17 +448,14 @@ async def game_loop():
                                         ball["y"] = b["y"] - r - 0.5 if overlap_top < overlap_bottom else b["y"] + b["h"] + r + 0.5
                                     break
 
-                # 탈락한 공 정리
                 for db in dead_balls:
                     if db in balls:
                         balls.remove(db)
 
-                # 모든 공이 떨어진 경우 실점 및 리셋
                 if len(balls) == 0:
                     sound_event = "lose"
                     reset_all_balls()
 
-                # 모든 블록 클리어 -> 다음 스테이지
                 if sum(1 for b in bricks if b["alive"]) == 0:
                     current_stage = (current_stage % TOTAL_STAGES) + 1
                     bricks = generate_stage(current_stage)
@@ -500,7 +476,6 @@ async def game_loop():
                 "hardened": b["hardened"]
             } for b in bricks if b["alive"]]
 
-            # 플레이어별 특수 기능 상태 정보
             powerup_status = {}
             for r in ["bottom", "left", "right"]:
                 rem = max(0.0, player_powerups[r]["until"] - now)
@@ -591,14 +566,14 @@ async def handler(websocket):
 
                 elif msg_type == "set_speed":
                     if not game_started:
-                        lvl = max(1, min(10, int(data.get("level", 6))))
+                        lvl = max(1, min(10, int(data.get("level", 4))))
                         BALL_SPEED_LEVEL = lvl
                         BALL_BASE_SPEED = BALL_SPEED_LEVEL * 1.02
                         await broadcast_lobby()
 
                 elif msg_type == "set_orb_speed":
                     if not game_started:
-                        lvl = max(1, min(10, int(data.get("level", 7))))
+                        lvl = max(1, min(10, int(data.get("level", 4))))
                         ORB_SPEED_LEVEL = lvl
                         ORB_BASE_SPEED = (ORB_SPEED_LEVEL / 7.0) * 0.048
                         orb["speed"] = ORB_BASE_SPEED
