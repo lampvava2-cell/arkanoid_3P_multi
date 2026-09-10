@@ -24,8 +24,17 @@
       font-size: 13px;
       color: #00ffcc;
       font-weight: bold;
-      margin-bottom: 6px;
+      margin-bottom: 4px;
       letter-spacing: 0.5px;
+    }
+    #netStatus {
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 10px;
+      background: #2a2010;
+      color: #ffaa00;
+      margin-bottom: 6px;
+      font-weight: bold;
     }
     #scoreboard {
       display: flex;
@@ -191,9 +200,9 @@
   </style>
 </head>
 <body>
-  <div id="versionTitle">스타트픽스_버전9.1 (Start Bug Fixed)</div>
+  <div id="versionTitle">소켓연결완료_확정버전9.3 (Fix Async Race & Status)</div>
+  <div id="netStatus">🟡 서버 신호 연결 중...</div>
 
-  <!-- 스코어보드 -->
   <div id="scoreboard">
     <div class="score-item left" id="score-left">L(좌): 0</div>
     <div class="score-item bottom" id="score-bottom">B(하): 0</div>
@@ -206,12 +215,10 @@
     <div id="stageBadge">STAGE 1 / 3</div>
     <canvas id="game" width="500" height="500"></canvas>
 
-    <!-- 카운트다운 레이어 -->
     <div id="countdownOverlay">
       <div id="countdownNumber">2</div>
     </div>
 
-    <!-- 로비 -->
     <div id="lobbyOverlay" class="overlay">
       <h2>포지션 선택 및 참가</h2>
       <div class="name-box">
@@ -232,7 +239,6 @@
       <button type="button" id="startBtn" onclick="requestStart()">GAME START</button>
     </div>
 
-    <!-- 대기실 -->
     <div id="waitingOverlay" class="overlay">
       <div class="waiting-spinner"></div>
       <h2 style="color:#ffcc00; margin-bottom:8px;">게임이 진행 중입니다</h2>
@@ -252,6 +258,7 @@
     const canvas = document.getElementById("game");
     const ctx = canvas.getContext("2d");
     const versionTitle = document.getElementById("versionTitle");
+    const netStatus = document.getElementById("netStatus");
     const lobbyOverlay = document.getElementById("lobbyOverlay");
     const waitingOverlay = document.getElementById("waitingOverlay");
     const countdownOverlay = document.getElementById("countdownOverlay");
@@ -265,7 +272,6 @@
     const scoreBottom = document.getElementById("score-bottom");
     const scoreRight = document.getElementById("score-right");
 
-    // Audio Context
     const AudioContext = window.AudioContext || window.webkitAudioContext;
     let audioCtx = null;
 
@@ -325,7 +331,7 @@
 
     const WS_URL = "wss://arkanoid-3p-multi.onrender.com";
     let ws = null;
-    let myRole = null;
+    let myRole = "bottom"; // 기본값을 하단으로 예약 지정
     let myName = "플레이어" + Math.floor(Math.random() * 900 + 100);
     nameInput.value = myName;
 
@@ -346,10 +352,20 @@
     }
 
     function connectSocket() {
+      netStatus.innerText = "🟡 서버 신호 연결 중...";
+      netStatus.style.background = "#2a2010";
+      netStatus.style.color = "#ffaa00";
+
       ws = new WebSocket(WS_URL);
 
       ws.onopen = () => {
+        netStatus.innerText = "🟢 서버 연결 완료 (온라인)";
+        netStatus.style.background = "#0f3636";
+        netStatus.style.color = "#00ffcc";
+
+        // 접속 즉시 이름과 기본 자리 등록
         ws.send(JSON.stringify({ type: "set_name", name: myName }));
+        ws.send(JSON.stringify({ type: "select_role", role: myRole }));
       };
 
       ws.onmessage = (e) => {
@@ -424,6 +440,9 @@
       };
 
       ws.onclose = () => {
+        netStatus.innerText = "🔴 서버 연결 끊김 (3초 후 재접속)";
+        netStatus.style.background = "#3a1010";
+        netStatus.style.color = "#ff4444";
         setTimeout(connectSocket, 3000);
       };
     }
@@ -450,28 +469,25 @@
 
     function selectRole(role) {
       initAudio();
-      if (!ws || ws.readyState !== WebSocket.OPEN) return;
       myRole = role;
       changeName();
-      ws.send(JSON.stringify({ type: "select_role", role: role }));
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "select_role", role: role }));
+      }
     }
 
     function requestStart() {
       initAudio();
       if (!ws || ws.readyState !== WebSocket.OPEN) {
-        alert("서버 연결 중입니다. 잠시 후 다시 눌러주세요.");
+        alert("서버와 통신 연결 중입니다. 상단 초록색 불이 켜지면 눌러주세요!");
         return;
       }
-      // 이름 즉시 전송
       changeName();
-
-      // 포지션을 아직 안 골랐다면 자동으로 'bottom(하단)' 배정
-      if (!myRole) {
-        selectRole('bottom');
-      }
-
-      // 서버로 게임 스타트 요청
-      ws.send(JSON.stringify({ type: "start_game" }));
+      // 내 역할 확정 전송 후 50ms 텀을 두고 start_game 전송하여 패킷 충돌 방지
+      ws.send(JSON.stringify({ type: "select_role", role: myRole }));
+      setTimeout(() => {
+        ws.send(JSON.stringify({ type: "start_game" }));
+      }, 50);
     }
 
     function updateLobbyUI(slots) {
