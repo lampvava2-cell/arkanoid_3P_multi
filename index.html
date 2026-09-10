@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>3인 멀티 알카노이드</title>
+  <style>
+    body {
+      margin: 0;
+      background: #111;
+      color: #fff;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      overflow: hidden;
+      touch-action: none;
+      font-family: sans-serif;
+    }
+    #status { margin-bottom: 8px; font-size: 14px; font-weight: bold; }
+    canvas {
+      background: #1a1a1a;
+      border: 2px solid #555;
+      box-shadow: 0 0 15px rgba(0,255,255,0.2);
+    }
+  </style>
+</head>
+<body>
+  <div id="status">서버 연결 중...</div>
+  <canvas id="game" width="400" height="600"></canvas>
+
+  <script>
+    const canvas = document.getElementById("game");
+    const ctx = canvas.getContext("2d");
+    const statusText = document.getElementById("status");
+
+    // 서버 주소 (추후 배포 주소로 갱신 예정)
+    const wsUrl = "ws://" + window.location.hostname + ":8765";
+    const ws = new WebSocket(wsUrl);
+
+    let myRole = null;
+    let bricks = [];
+    let deadBrickIds = new Set();
+    let ball = { x: 200, y: 300, radius: 8 };
+    let paddles = { bottom: 200, left: 300, right: 300 };
+    let botSlots = [];
+
+    ws.onmessage = (event) => {
+      const msg = JSON.parse(event.data);
+      if (msg.type === "init") {
+        myRole = msg.role;
+        bricks = msg.bricks;
+        statusText.innerText = `접속 완료! 배정 포지션: [ ${myRole.toUpperCase()} ]`;
+        statusText.style.color = myRole === "bottom" ? "#00ffcc" : (myRole === "left" ? "#ff007f" : "#ffaa00");
+      } else if (msg.type === "update") {
+        ball = msg.ball;
+        paddles = msg.paddles;
+        botSlots = msg.bot_slots || [];
+        msg.bricks.forEach(id => deadBrickIds.add(id));
+        render();
+      } else if (msg.type === "full") {
+        statusText.innerText = "정원 초과 (최대 3명 이미 플레이 중)";
+      }
+    };
+
+    // 모바일 터치 드래그 연동
+    function handleTouch(e) {
+      if (!myRole) return;
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
+      const touch = e.touches[0];
+      const touchX = (touch.clientX - rect.left) * scaleX;
+      const touchY = (touch.clientY - rect.top) * scaleY;
+
+      let pos = 0;
+      if (myRole === "bottom") {
+        pos = Math.max(35, Math.min(365, touchX));
+      } else {
+        pos = Math.max(35, Math.min(565, touchY));
+      }
+
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "move", pos: pos }));
+      }
+    }
+
+    canvas.addEventListener("touchmove", handleTouch, { passive: false });
+    canvas.addEventListener("touchstart", handleTouch, { passive: false });
+
+    function render() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // 1. 상단 벽 (가이드)
+      ctx.fillStyle = "#444";
+      ctx.fillRect(0, 0, canvas.width, 10);
+
+      // 2. 벽돌 그리기
+      bricks.forEach(b => {
+        if (!deadBrickIds.has(b.id)) {
+          ctx.fillStyle = "#3a7bd5";
+          ctx.fillRect(b.x, b.y, b.w, b.h);
+          ctx.strokeStyle = "#00d2ff";
+          ctx.strokeRect(b.x, b.y, b.w, b.h);
+        }
+      });
+
+      // 3. 패들 3종 그리기 (BOT 여부 라벨링)
+      // 하단 (Bottom)
+      const isBottomBot = botSlots.includes("bottom");
+      ctx.fillStyle = isBottomBot ? "#666" : "#00ffcc";
+      ctx.fillRect(paddles.bottom - 32.5, canvas.height - 20, 65, 10);
+      ctx.fillStyle = "#fff";
+      ctx.font = "10px sans-serif";
+      ctx.fillText(isBottomBot ? "BOT" : (myRole === "bottom" ? "YOU" : "P1"), paddles.bottom - 10, canvas.height - 25);
+
+      // 좌측 (Left)
+      const isLeftBot = botSlots.includes("left");
+      ctx.fillStyle = isLeftBot ? "#666" : "#ff007f";
+      ctx.fillRect(10, paddles.left - 32.5, 10, 65);
+      ctx.fillText(isLeftBot ? "BOT" : (myRole === "left" ? "YOU" : "P2"), 25, paddles.left + 4);
+
+      // 우측 (Right)
+      const isRightBot = botSlots.includes("right");
+      ctx.fillStyle = isRightBot ? "#666" : "#ffaa00";
+      ctx.fillRect(canvas.width - 20, paddles.right - 32.5, 10, 65);
+      ctx.fillText(isRightBot ? "BOT" : (myRole === "right" ? "YOU" : "P3"), canvas.width - 45, paddles.right + 4);
+
+      // 4. 공 그리기
+      ctx.beginPath();
+      ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
+      ctx.fillStyle = "#ffffff";
+      ctx.shadowColor = "#00ffff";
+      ctx.shadowBlur = 8;
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.closePath();
+    }
+  </script>
+</body>
+</html>
