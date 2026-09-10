@@ -53,7 +53,6 @@
     .score-item.left { color: #ff007f; }
     .score-item.right { color: #ffaa00; }
 
-    /* [상단 마법 충전 게이지바 UI] */
     #chargeContainer {
       width: min(92vw, 480px);
       height: 14px;
@@ -63,7 +62,7 @@
       margin-bottom: 6px;
       overflow: hidden;
       position: relative;
-      display: none; /* 삼켰을 때만 표시 */
+      display: none;
       box-shadow: 0 0 10px rgba(255, 0, 234, 0.4);
     }
     #chargeBar {
@@ -261,7 +260,7 @@
   </style>
 </head>
 <body>
-  <div id="versionTitle">정통알카노이드 (Orb Charge Gauge)</div>
+  <div id="versionTitle">정통알카노이드 (Block Regeneration 20%)</div>
   <div id="netStatus">🟡 Railway 서버 신호 연결 중...</div>
 
   <div id="scoreboard">
@@ -270,7 +269,6 @@
     <div class="score-item right" id="score-right">R(우): 0</div>
   </div>
 
-  <!-- [상단 마법 게이지 디스플레이] -->
   <div id="chargeContainer">
     <div id="chargeBar"></div>
     <div id="chargeText">ORB CHARGING 0%</div>
@@ -368,6 +366,16 @@
         osc.start(now);
         osc.stop(now + 0.09);
       } 
+      else if (type === "restore") {
+        // 블록 20% 복원 특수 효과음 (신비로운 상승 아르페지오 톤)
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(330, now);
+        osc.frequency.exponentialRampToValueAtTime(880, now + 0.2);
+        gain.gain.setValueAtTime(0.28, now);
+        gain.gain.linearRampToValueAtTime(0.01, now + 0.2);
+        osc.start(now);
+        osc.stop(now + 0.2);
+      }
       else if (type === "catch") {
         osc.type = "sine";
         osc.frequency.setValueAtTime(440, now);
@@ -436,7 +444,7 @@
     nameInput.value = myName;
 
     let bricks = [];
-    let deadBrickIds = new Set();
+    let aliveBrickIds = new Set();
     let ball = { x: 250, y: 350, radius: 8 };
     let orbData = null;
     let paddles = { bottom: 250, left: 250, right: 250 };
@@ -500,6 +508,7 @@
           stageBadge.style.display = "block";
           stageBadge.innerText = `STAGE ${msg.stage} / 3 (관전 중)`;
           bricks = msg.bricks;
+          aliveBrickIds = new Set(bricks.filter(b => b.alive).map(b => b.id));
         } 
         else if (msg.type === "game_start") {
           if (msg.assigned_role) {
@@ -509,7 +518,7 @@
           waitingOverlay.style.display = "none";
           stageBadge.style.display = "block";
           bricks = msg.bricks;
-          deadBrickIds.clear();
+          aliveBrickIds = new Set(bricks.filter(b => b.alive).map(b => b.id));
         } 
         else if (msg.type === "game_update") {
           ball = msg.ball;
@@ -522,16 +531,18 @@
           playerNames = msg.names || playerNames;
           botSlots = msg.bot_slots || [];
           stageBadge.innerText = `STAGE ${msg.stage} / 3`;
-          msg.bricks.forEach(id => deadBrickIds.add(id));
+
+          if (msg.alive_brick_ids) {
+            aliveBrickIds = new Set(msg.alive_brick_ids);
+          }
 
           if (msg.scores) updateScoreboard(msg.scores, playerNames);
 
-          // [마법 충전 게이지바 표시/갱신 처리]
           if (orbData && orbData.holding) {
             chargeContainer.style.display = "block";
             const pct = Math.round(orbData.progress * 100);
             chargeBar.style.width = `${pct}%`;
-            chargeText.innerText = `ORB CHARGING ${pct}%`;
+            chargeText.innerText = `ORB CHARGING ${pct}% (블록 20% 복원!)`;
           } else {
             chargeContainer.style.display = "none";
             chargeBar.style.width = "0%";
@@ -692,7 +703,6 @@
         ctx.stroke();
         ctx.closePath();
 
-        // 마법구슬
         ctx.beginPath();
         ctx.arc(orbData.x, orbData.y, 13, 0, Math.PI * 2);
         ctx.fillStyle = orbData.holding ? "#ffcc00" : "#ff00ea";
@@ -710,9 +720,9 @@
         ctx.restore();
       }
 
-      // 벽돌
+      // 벽돌 렌더링 (살아있는 ID 기준)
       bricks.forEach(b => {
-        if (!deadBrickIds.has(b.id)) {
+        if (aliveBrickIds.has(b.id)) {
           ctx.fillStyle = "#2c5282";
           ctx.fillRect(b.x, b.y, b.w, b.h);
           ctx.strokeStyle = "#4299e1";
