@@ -122,25 +122,25 @@
     .overlay {
       position: absolute;
       top: 0; left: 0; width: 100%; height: 100%;
-      background: rgba(11, 12, 18, 0.94);
+      background: rgba(11, 12, 18, 0.95);
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
       z-index: 10;
-      padding: 16px;
+      padding: 14px;
     }
-    h2 { margin: 0 0 10px 0; color: #fff; font-size: 18px; }
+    h2 { margin: 0 0 8px 0; color: #fff; font-size: 17px; }
     
     .name-box {
       display: flex;
       gap: 6px;
-      width: 86%;
-      margin-bottom: 10px;
+      width: 88%;
+      margin-bottom: 8px;
     }
     .name-box input {
       flex: 1;
-      padding: 9px;
+      padding: 8px;
       border-radius: 6px;
       border: 1px solid #445;
       background: #1d2030;
@@ -158,40 +158,46 @@
       font-size: 12px;
     }
 
+    /* 속도 조절 듀얼 패널 */
+    .sliders-panel {
+      width: 88%;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-bottom: 10px;
+    }
     .speed-control-box {
-      width: 86%;
       background: #1a1d2e;
       border: 1px solid #334;
       border-radius: 8px;
-      padding: 8px 12px;
-      margin-bottom: 12px;
+      padding: 6px 10px;
       display: flex;
       flex-direction: column;
-      gap: 4px;
+      gap: 3px;
     }
     .speed-labels {
       display: flex;
       justify-content: space-between;
-      font-size: 12px;
+      font-size: 11px;
       color: #aaa;
     }
     .speed-labels span strong {
-      color: #00ffcc;
-      font-size: 14px;
+      font-size: 13px;
     }
     .speed-slider {
       width: 100%;
-      accent-color: #00ffcc;
       cursor: pointer;
     }
+    #speedSlider { accent-color: #00ffcc; }
+    #orbSpeedSlider { accent-color: #ff00ea; }
     
-    .role-grid { display: flex; flex-direction: column; gap: 7px; width: 86%; margin-bottom: 12px; }
+    .role-grid { display: flex; flex-direction: column; gap: 6px; width: 88%; margin-bottom: 10px; }
     .role-btn {
-      padding: 10px 14px;
+      padding: 9px 12px;
       border: 2px solid #3e445b;
       background: #1d2030;
       color: #fff;
-      font-size: 13px;
+      font-size: 12px;
       font-weight: bold;
       border-radius: 8px;
       display: flex;
@@ -201,13 +207,13 @@
     }
     .role-btn.active { border-color: #00ffcc; background: #0f3636; color: #00ffcc; }
     #startBtn {
-      width: 86%;
-      padding: 12px;
+      width: 88%;
+      padding: 11px;
       background: #00d2ff;
       border: none;
       border-radius: 8px;
       color: #000;
-      font-size: 15px;
+      font-size: 14px;
       font-weight: bold;
       cursor: pointer;
     }
@@ -260,7 +266,7 @@
   </style>
 </head>
 <body>
-  <div id="versionTitle">정통알카노이드 (블록피격 & 특수아이템)</div>
+  <div id="versionTitle">정통알카노이드 (구슬정밀판정 & 속도조절)</div>
   <div id="netStatus">🟡 Railway 서버 신호 연결 중...</div>
 
   <div id="scoreboard">
@@ -286,18 +292,29 @@
     </div>
 
     <div id="lobbyOverlay" class="overlay">
-      <h2>포지션 선택 및 참가</h2>
+      <h2>포지션 선택 및 세팅</h2>
       <div class="name-box">
         <input type="text" id="nameInput" placeholder="닉네임 입력 (최대 6자)" maxlength="6">
         <button type="button" onclick="changeName()">확인</button>
       </div>
 
-      <div class="speed-control-box">
-        <div class="speed-labels">
-          <span>공 속도 설정</span>
-          <span><strong id="speedValue">6</strong> 단계 (1~10)</span>
+      <!-- 공 속도 & 마법구슬 속도 듀얼 슬라이더 -->
+      <div class="sliders-panel">
+        <div class="speed-control-box">
+          <div class="speed-labels">
+            <span>공 속도 설정</span>
+            <span><strong id="speedValue" style="color:#00ffcc;">6</strong> 단계 (1~10)</span>
+          </div>
+          <input type="range" min="1" max="10" value="6" id="speedSlider" class="speed-slider" oninput="changeSpeed(this.value)">
         </div>
-        <input type="range" min="1" max="10" value="6" id="speedSlider" class="speed-slider" oninput="changeSpeed(this.value)">
+
+        <div class="speed-control-box">
+          <div class="speed-labels">
+            <span>마법구슬 회전 속도</span>
+            <span><strong id="orbSpeedValue" style="color:#ff00ea;">7</strong> 단계 (1~10)</span>
+          </div>
+          <input type="range" min="1" max="10" value="7" id="orbSpeedSlider" class="speed-slider" oninput="changeOrbSpeed(this.value)">
+        </div>
       </div>
 
       <div class="role-grid">
@@ -444,8 +461,11 @@
     const stageBadge = document.getElementById("stageBadge");
     const nameInput = document.getElementById("nameInput");
     const waitingNameInput = document.getElementById("waitingNameInput");
+
     const speedSlider = document.getElementById("speedSlider");
     const speedValue = document.getElementById("speedValue");
+    const orbSpeedSlider = document.getElementById("orbSpeedSlider");
+    const orbSpeedValue = document.getElementById("orbSpeedValue");
 
     const chargeContainer = document.getElementById("chargeContainer");
     const chargeBar = document.getElementById("chargeBar");
@@ -461,7 +481,6 @@
     let myName = "플레이어" + Math.floor(Math.random() * 900 + 100);
     nameInput.value = myName;
 
-    // 서버와 완벽 동기화되는 살아있는 블록 배열
     let activeBricks = [];
     let ball = { x: 250, y: 350, radius: 8 };
     let orbData = null;
@@ -485,6 +504,13 @@
       speedValue.innerText = val;
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: "set_speed", level: parseInt(val) }));
+      }
+    }
+
+    function changeOrbSpeed(val) {
+      orbSpeedValue.innerText = val;
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "set_orb_speed", level: parseInt(val) }));
       }
     }
 
@@ -514,6 +540,10 @@
           if (msg.speed_level !== undefined) {
             speedSlider.value = msg.speed_level;
             speedValue.innerText = msg.speed_level;
+          }
+          if (msg.orb_speed_level !== undefined) {
+            orbSpeedSlider.value = msg.orb_speed_level;
+            orbSpeedValue.innerText = msg.orb_speed_level;
           }
 
           if (msg.waiting_users && msg.waiting_users.length > 0 && myRole) {
@@ -552,7 +582,6 @@
           botSlots = msg.bot_slots || [];
           stageBadge.innerText = `STAGE ${msg.stage} / 3`;
 
-          // [핵심] 서버에서 보낸 실제 살아있는 블록들만 수신
           if (msg.active_bricks) {
             activeBricks = msg.active_bricks;
           }
@@ -715,7 +744,6 @@
       ctx.fillStyle = "#fff";
       ctx.font = "bold 10px sans-serif";
 
-      // [핵심] 닉네임 옆에 남은 시간 표시: 예) 홍길동 ⚡[14s]
       let displayStr = labelText;
       if (remainTime > 0) {
         displayStr += ` ⚡[${Math.ceil(remainTime)}s]`;
@@ -736,7 +764,7 @@
       ctx.fillStyle = "#333";
       ctx.fillRect(0, 0, canvas.width, 10);
 
-      // 마법구슬 서클 레일
+      // 서클 레일 및 소형화된 마법구슬
       if (orbData) {
         ctx.save();
         ctx.beginPath();
@@ -747,42 +775,41 @@
         ctx.stroke();
         ctx.closePath();
 
+        // 9px 소형 마법구슬
+        const orbR = orbData.radius || 9;
         ctx.beginPath();
-        ctx.arc(orbData.x, orbData.y, 13, 0, Math.PI * 2);
+        ctx.arc(orbData.x, orbData.y, orbR, 0, Math.PI * 2);
         ctx.fillStyle = orbData.holding ? "#ffcc00" : "#ff00ea";
         ctx.shadowColor = orbData.holding ? "#ffcc00" : "#ff00ea";
-        ctx.shadowBlur = orbData.holding ? 25 : 18;
+        ctx.shadowBlur = orbData.holding ? 22 : 14;
         ctx.fill();
         ctx.shadowBlur = 0;
         ctx.closePath();
 
         ctx.beginPath();
-        ctx.arc(orbData.x, orbData.y, 6, 0, Math.PI * 2);
+        ctx.arc(orbData.x, orbData.y, 4, 0, Math.PI * 2);
         ctx.fillStyle = "#ffffff";
         ctx.fill();
         ctx.closePath();
         ctx.restore();
       }
 
-      // [핵심] 실제 살아있는 블록만 그리기
+      // 살아있는 블록 렌더링
       activeBricks.forEach(b => {
         ctx.save();
         if (b.hardened) {
-          // 부활 블록 (2번 쳐야 하는 특수 블록)
           if (b.hp === 2) {
-            ctx.fillStyle = "#d4af37"; // 메탈릭 골드
+            ctx.fillStyle = "#d4af37";
             ctx.strokeStyle = "#fff275";
             ctx.lineWidth = 1.5;
             ctx.shadowColor = "#ffd700";
             ctx.shadowBlur = 8;
           } else {
-            // 1번 맞고 HP 1 남았을 때 균열 색상 (붉은 주황)
             ctx.fillStyle = "#b84200";
             ctx.strokeStyle = "#ff7733";
             ctx.lineWidth = 1;
           }
         } else {
-          // 일반 기본 블록 (공 1방에 사라짐)
           ctx.fillStyle = "#2c5282";
           ctx.strokeStyle = "#4299e1";
           ctx.lineWidth = 1;
@@ -791,7 +818,6 @@
         ctx.fillRect(b.x, b.y, b.w, b.h);
         ctx.strokeRect(b.x, b.y, b.w, b.h);
 
-        // 부활 블록은 엠블럼 표시
         if (b.hardened && b.hp === 2) {
           ctx.fillStyle = "#fff";
           ctx.font = "bold 9px sans-serif";
