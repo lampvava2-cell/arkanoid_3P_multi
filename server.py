@@ -4,16 +4,14 @@ import math
 import random
 import websockets
 
-# 완벽한 1:1 대칭 정사각 좌표계 (500 x 500)
 WIDTH = 500
 HEIGHT = 500
 
-VERSION_TITLE = "완전정사각대기실버전6(TrueSquare& Waiting Room)"
+VERSION_TITLE = "정밀물리엔진버전7 (Precision Collision & Anti-Ghost)"
 
-# 슬롯 관리: "bottom", "left", "right"
-SLOTS = {"bottom": None, "left": None, "right": None}  # ws or None(BOT)
+SLOTS = {"bottom": None, "left": None, "right": None}
 PLAYER_NAMES = {"bottom": "BOT", "left": "BOT", "right": "BOT"}
-CONNECTED_CLIENTS = {}  # ws: {"role": None, "name": "익명", "state": "lobby"|"playing"|"waiting"}
+CONNECTED_CLIENTS = {}
 
 game_started = False
 current_stage = 1
@@ -41,7 +39,6 @@ def generate_stage(stage_num):
     brick_id = 0
     center_x, center_y = WIDTH / 2, HEIGHT / 2 - 20
     if stage_num == 1:
-        # 스테이지 1: 6x6 정사각 중앙 블록
         rows, cols = 6, 6
         start_x = (WIDTH - (cols * 36)) / 2 + 3
         start_y = (HEIGHT - (rows * 22)) / 2 - 20
@@ -50,14 +47,12 @@ def generate_stage(stage_num):
                 new_bricks.append({"id": brick_id, "x": start_x + c * 36, "y": start_y + r * 22, "w": 30, "h": 14, "alive": True})
                 brick_id += 1
     elif stage_num == 2:
-        # 스테이지 2: 십자형 정방 대칭
         for r in range(7):
             for c in range(7):
                 if r == 3 or c == 3 or (abs(r - 3) + abs(c - 3) <= 2):
                     new_bricks.append({"id": brick_id, "x": center_x - 126 + c * 36, "y": center_y - 77 + r * 22, "w": 30, "h": 14, "alive": True})
                     brick_id += 1
     else:
-        # 스테이지 3: 8x8 다이아몬드 요새
         for r in range(8):
             for c in range(8):
                 if r in [0, 7] or c in [0, 7] or (r in [3, 4] and c in [3, 4]):
@@ -135,7 +130,8 @@ async def game_loop():
         if game_started:
             update_ai()
 
-            sub_steps = 2
+            # [핵심 개선] 터널링 방지를 위한 4회 서브스텝 (초정밀 물리 분할)
+            sub_steps = 4
             step_vx = ball["vx"] / sub_steps
             step_vy = ball["vy"] / sub_steps
 
@@ -143,16 +139,17 @@ async def game_loop():
                 ball["x"] += step_vx
                 ball["y"] += step_vy
 
-                # 상단 천장
+                # 1. 상단 천장 반사
                 if ball["y"] - ball["radius"] <= 10:
                     ball["y"] = 10 + ball["radius"]
                     ball["vy"] = abs(ball["vy"])
                     step_vy = abs(step_vy)
 
-                # 하단 패들
+                # 2. 하단 패들 충돌 (곡면 반사 및 침투 방지)
                 if ball["y"] + ball["radius"] >= HEIGHT - 22:
                     pad_x = paddle_positions["bottom"]
                     if pad_x - P_LEN / 2 <= ball["x"] <= pad_x + P_LEN / 2:
+                        ball["y"] = HEIGHT - 22 - ball["radius"]  # 패들 위로 위치 강제 보정
                         offset = (ball["x"] - pad_x) / (P_LEN / 2)
                         rebound_angle = offset * (math.pi / 3)
                         ball["vx"] = BALL_BASE_SPEED * math.sin(rebound_angle)
@@ -163,10 +160,11 @@ async def game_loop():
                         reset_ball()
                         break
 
-                # 좌측 패들
+                # 3. 좌측 패들 충돌 (곡면 반사 및 침투 방지)
                 if ball["x"] - ball["radius"] <= 22:
                     pad_y = paddle_positions["left"]
                     if pad_y - P_LEN / 2 <= ball["y"] <= pad_y + P_LEN / 2:
+                        ball["x"] = 22 + ball["radius"]  # 패들 우측으로 위치 강제 보정
                         offset = (ball["y"] - pad_y) / (P_LEN / 2)
                         adj_offset = max(-1.0, min(1.0, offset - 0.25))
                         rebound_angle = adj_offset * (math.pi / 3.2)
@@ -181,10 +179,11 @@ async def game_loop():
                         reset_ball()
                         break
 
-                # 우측 패들
+                # 4. 우측 패들 충돌 (곡면 반사 및 침투 방지)
                 if ball["x"] + ball["radius"] >= WIDTH - 22:
                     pad_y = paddle_positions["right"]
                     if pad_y - P_LEN / 2 <= ball["y"] <= pad_y + P_LEN / 2:
+                        ball["x"] = WIDTH - 22 - ball["radius"]  # 패들 좌측으로 위치 강제 보정
                         offset = (ball["y"] - pad_y) / (P_LEN / 2)
                         adj_offset = max(-1.0, min(1.0, offset - 0.25))
                         rebound_angle = adj_offset * (math.pi / 3.2)
@@ -199,24 +198,59 @@ async def game_loop():
                         reset_ball()
                         break
 
-                # 벽돌 충돌
+                # 5. [핵심 개선] 정밀 Circle-AABB 최근접점 충돌 판정 (유령 반사 및 관통 완벽 차단)
+                hit_brick = None
                 r = ball["radius"]
+                
                 for b in bricks:
-                    if b["alive"]:
-                        if (ball["x"] + r >= b["x"] and ball["x"] - r <= b["x"] + b["w"] and
-                            ball["y"] + r >= b["y"] and ball["y"] - r <= b["y"] + b["h"]):
-                            b["alive"] = False
-                            prev_x = ball["x"] - step_vx
-                            prev_y = ball["y"] - step_vy
-                            if prev_x + r <= b["x"] or prev_x - r >= b["x"] + b["w"]:
-                                ball["vx"] = -ball["vx"]
-                                step_vx = -step_vx
-                            else:
-                                ball["vy"] = -ball["vy"]
-                                step_vy = -step_vy
-                            break
+                    if not b["alive"]:
+                        continue
 
-            # 스테이지 클리어
+                    # 사각형 내에서 공 중심과 가장 가까운 점(Closest Point) 계산
+                    closest_x = max(b["x"], min(ball["x"], b["x"] + b["w"]))
+                    closest_y = max(b["y"], min(ball["y"], b["y"] + b["h"]))
+
+                    dist_x = ball["x"] - closest_x
+                    dist_y = ball["y"] - closest_y
+                    distance_sq = (dist_x * dist_x) + (dist_y * dist_y)
+
+                    # 실제 원의 반지름 이내로 들어왔을 때만 진짜 충돌 인정 (유령 반사 방지)
+                    if distance_sq < (r * r):
+                        hit_brick = b
+                        b["alive"] = False
+
+                        # 충돌 깊이(침투량)에 따라 법선 방향 결정
+                        overlap_left = (ball["x"] + r) - b["x"]
+                        overlap_right = (b["x"] + b["w"]) - (ball["x"] - r)
+                        overlap_top = (ball["y"] + r) - b["y"]
+                        overlap_bottom = (b["y"] + b["h"]) - (ball["y"] - r)
+
+                        min_overlap_x = min(overlap_left, overlap_right)
+                        min_overlap_y = min(overlap_top, overlap_bottom)
+
+                        if min_overlap_x < min_overlap_y:
+                            # 좌우 측면 충돌
+                            ball["vx"] = -ball["vx"]
+                            step_vx = -step_vx
+                            # 파묻힘 방지 밀어내기
+                            if overlap_left < overlap_right:
+                                ball["x"] = b["x"] - r - 0.5
+                            else:
+                                ball["x"] = b["x"] + b["w"] + r + 0.5
+                        else:
+                            # 상하 면 충돌
+                            ball["vy"] = -ball["vy"]
+                            step_vy = -step_vy
+                            # 파묻힘 방지 밀어내기
+                            if overlap_top < overlap_bottom:
+                                ball["y"] = b["y"] - r - 0.5
+                            else:
+                                ball["y"] = b["y"] + b["h"] + r + 0.5
+                        
+                        # 1서브스텝 당 1개의 벽돌만 처리하고 즉시 루프 탈출 (이중 충돌 연산 왜곡 방지)
+                        break
+
+            # 스테이지 클리어 확인
             if sum(1 for b in bricks if b["alive"]) == 0:
                 current_stage = (current_stage % TOTAL_STAGES) + 1
                 bricks = generate_stage(current_stage)
@@ -245,11 +279,9 @@ async def game_loop():
         await asyncio.sleep(0.016)
 
 async def handler(websocket):
-    # 신규 접속 처리: 게임 진행 중이면 대기실 상태로 등록
     state = "waiting" if game_started else "lobby"
     CONNECTED_CLIENTS[websocket] = {"role": None, "name": f"게스트{random.randint(100, 999)}", "state": state}
     
-    # 늦게 온 접속자에게 현재 게임 상태 즉시 동기화
     if game_started:
         await websocket.send(json.dumps({
             "type": "waiting_room_notice",
@@ -272,14 +304,12 @@ async def handler(websocket):
 
             elif msg_type == "select_role":
                 if game_started:
-                    continue  # 진행 중엔 로비 슬롯 변경 불가
+                    continue
                 role = data.get("role")
-                # 이전 슬롯 비우기
                 for r in ["bottom", "left", "right"]:
                     if SLOTS[r] == websocket:
                         SLOTS[r] = None
                         PLAYER_NAMES[r] = "BOT"
-                # 새 슬롯 배정
                 if role in SLOTS and (SLOTS[role] is None or SLOTS[role] == websocket):
                     SLOTS[role] = websocket
                     PLAYER_NAMES[role] = CONNECTED_CLIENTS[websocket]["name"]
@@ -319,7 +349,6 @@ async def handler(websocket):
                 PLAYER_NAMES[r] = "BOT"
         CONNECTED_CLIENTS.pop(websocket, None)
         
-        # 만약 플레이어가 아무도 없으면 게임 자동 리셋
         active_users = [ws for ws, info in CONNECTED_CLIENTS.items() if info["role"]]
         if len(active_users) == 0:
             game_started = False
@@ -327,7 +356,7 @@ async def handler(websocket):
 
 async def main():
     server = await websockets.serve(handler, "0.0.0.0", 8765)
-    print(f"[{VERSION_TITLE}] 서버 가동 시작...")
+    print(f"[{VERSION_TITLE}] 서버 정상 가동...")
     await asyncio.gather(server.wait_closed(), game_loop())
 
 if __name__ == "__main__":
