@@ -7,15 +7,17 @@ import websockets
 WIDTH = 500
 HEIGHT = 500
 
-VERSION_TITLE = "정밀물리엔진버전7 (Precision Collision & Anti-Ghost)"
+VERSION_TITLE = "무수직반사_스코어버전8 (Angle Forced & Score System)"
 
 SLOTS = {"bottom": None, "left": None, "right": None}
 PLAYER_NAMES = {"bottom": "BOT", "left": "BOT", "right": "BOT"}
+SCORES = {"bottom": 0, "left": 0, "right": 0}
 CONNECTED_CLIENTS = {}
 
 game_started = False
 current_stage = 1
 TOTAL_STAGES = 3
+last_hitter = None  # 마지막으로 공을 친 슬롯 ("bottom", "left", "right")
 
 paddle_positions = {
     "bottom": WIDTH / 2,
@@ -23,7 +25,7 @@ paddle_positions = {
     "right": HEIGHT / 2
 }
 
-BALL_BASE_SPEED = 6.5
+BALL_BASE_SPEED = 6.8
 ball = {
     "x": WIDTH / 2,
     "y": HEIGHT / 2 + 100,
@@ -61,17 +63,19 @@ def generate_stage(stage_num):
     return new_bricks
 
 def reset_ball():
-    global ball
+    global ball, last_hitter
     ball["x"] = WIDTH / 2
     ball["y"] = HEIGHT / 2 + 80
-    angle = random.uniform(-0.6, 0.6)
+    # 발사 시에도 완벽한 수직 발사 배제
+    angle = random.choice([-1, 1]) * random.uniform(0.35, 0.75)
     ball["vx"] = BALL_BASE_SPEED * math.sin(angle)
     ball["vy"] = -abs(BALL_BASE_SPEED * math.cos(angle))
+    last_hitter = None
 
 bricks = generate_stage(current_stage)
 
 def update_ai():
-    ai_speed = 6.0
+    ai_speed = 6.2
     if SLOTS["bottom"] is None:
         tx = ball["x"]
         cx = paddle_positions["bottom"]
@@ -94,10 +98,7 @@ async def broadcast_lobby():
     slots_info = {}
     for role in ["bottom", "left", "right"]:
         ws = SLOTS[role]
-        if ws is None:
-            slots_info[role] = {"type": "BOT", "name": "BOT"}
-        else:
-            slots_info[role] = {"type": "USER", "name": PLAYER_NAMES[role]}
+        slots_info[role] = {"type": "BOT" if ws is None else "USER", "name": PLAYER_NAMES[role]}
 
     waiting_users = [info["name"] for ws, info in CONNECTED_CLIENTS.items() if info["state"] == "waiting"]
 
@@ -105,6 +106,7 @@ async def broadcast_lobby():
         "type": "lobby_state",
         "title": VERSION_TITLE,
         "slots": slots_info,
+        "scores": SCORES,
         "game_started": game_started,
         "waiting_users": waiting_users,
         "stage": current_stage
@@ -115,22 +117,30 @@ async def broadcast_lobby():
         except:
             pass
 
-def enforce_speed(vx, vy):
+def enforce_non_vertical(vx, vy, base_dir="y"):
+    """수직/수평 단조 궤적 완전 제거 및 속도 정규화"""
+    min_component = 2.4
+    if base_dir == "y":
+        # 하단 패들 반사: 수직(vx=0) 방지
+        if abs(vx) < min_component:
+            vx = min_component if vx >= 0 else -min_component
+    else:
+        # 좌/우 패들 반사: 수평(vy=0) 방지
+        if abs(vy) < min_component:
+            vy = min_component if vy >= 0 else -min_component
+
     current_speed = math.hypot(vx, vy)
-    if current_speed == 0:
-        return BALL_BASE_SPEED, -BALL_BASE_SPEED
     scale = BALL_BASE_SPEED / current_speed
     return vx * scale, vy * scale
 
 async def game_loop():
-    global game_started, current_stage, bricks, ball
+    global game_started, current_stage, bricks, ball, last_hitter
     P_LEN = 70
 
     while True:
         if game_started:
             update_ai()
 
-            # [핵심 개선] 터널링 방지를 위한 4회 서브스텝 (초정밀 물리 분할)
             sub_steps = 4
             step_vx = ball["vx"] / sub_steps
             step_vy = ball["vy"] / sub_steps
@@ -143,120 +153,118 @@ async def game_loop():
                 if ball["y"] - ball["radius"] <= 10:
                     ball["y"] = 10 + ball["radius"]
                     ball["vy"] = abs(ball["vy"])
-                    step_vy = abs(step_vy)
+                    ball["vx"], ball["vy"] = enforce_non_vertical(ball["vx"], ball["vy"], "y")
+                    step_vx = ball["vx"] / sub_steps
+                    step_vy = ball["vy"] / sub_steps
 
-                # 2. 하단 패들 충돌 (곡면 반사 및 침투 방지)
+                # 2. 하단 패들 충돌
                 if ball["y"] + ball["radius"] >= HEIGHT - 22:
                     pad_x = paddle_positions["bottom"]
                     if pad_x - P_LEN / 2 <= ball["x"] <= pad_x + P_LEN / 2:
-                        ball["y"] = HEIGHT - 22 - ball["radius"]  # 패들 위로 위치 강제 보정
+                        ball["y"] = HEIGHT - 22 - ball["radius"]
                         offset = (ball["x"] - pad_x) / (P_LEN / 2)
-                        rebound_angle = offset * (math.pi / 3)
+                        
+                        # [무수직 반사] 정중앙 타격 시 강제로 최소 20도 각도 부여
+                        if abs(offset) < 0.22:
+                            offset = 0.35 if offset >= 0 else -0.35
+                        
+                        rebound_angle = offset * (math.pi / 2.8)
                         ball["vx"] = BALL_BASE_SPEED * math.sin(rebound_angle)
                         ball["vy"] = -BALL_BASE_SPEED * math.cos(rebound_angle)
+                        ball["vx"], ball["vy"] = enforce_non_vertical(ball["vx"], ball["vy"], "y")
                         step_vx = ball["vx"] / sub_steps
                         step_vy = ball["vy"] / sub_steps
+                        last_hitter = "bottom"
                     elif ball["y"] > HEIGHT + 30:
+                        SCORES["bottom"] = max(0, SCORES["bottom"] - 200)  # 실점
                         reset_ball()
                         break
 
-                # 3. 좌측 패들 충돌 (곡면 반사 및 침투 방지)
+                # 3. 좌측 패들 충돌
                 if ball["x"] - ball["radius"] <= 22:
                     pad_y = paddle_positions["left"]
                     if pad_y - P_LEN / 2 <= ball["y"] <= pad_y + P_LEN / 2:
-                        ball["x"] = 22 + ball["radius"]  # 패들 우측으로 위치 강제 보정
+                        ball["x"] = 22 + ball["radius"]
                         offset = (ball["y"] - pad_y) / (P_LEN / 2)
-                        adj_offset = max(-1.0, min(1.0, offset - 0.25))
-                        rebound_angle = adj_offset * (math.pi / 3.2)
+                        if abs(offset) < 0.22:
+                            offset = -0.35  # 상향 각도 편향
+                        
+                        adj_offset = max(-1.0, min(1.0, offset - 0.2))
+                        rebound_angle = adj_offset * (math.pi / 2.9)
                         ball["vx"] = BALL_BASE_SPEED * math.cos(rebound_angle)
                         ball["vy"] = BALL_BASE_SPEED * math.sin(rebound_angle)
-                        if abs(ball["vy"]) < 2.5:
-                            ball["vy"] = -2.8 if offset <= 0 else 2.8
-                        ball["vx"], ball["vy"] = enforce_speed(ball["vx"], ball["vy"])
+                        ball["vx"], ball["vy"] = enforce_non_vertical(ball["vx"], ball["vy"], "x")
                         step_vx = ball["vx"] / sub_steps
                         step_vy = ball["vy"] / sub_steps
+                        last_hitter = "left"
                     elif ball["x"] < -30:
+                        SCORES["left"] = max(0, SCORES["left"] - 200)  # 실점
                         reset_ball()
                         break
 
-                # 4. 우측 패들 충돌 (곡면 반사 및 침투 방지)
+                # 4. 우측 패들 충돌
                 if ball["x"] + ball["radius"] >= WIDTH - 22:
                     pad_y = paddle_positions["right"]
                     if pad_y - P_LEN / 2 <= ball["y"] <= pad_y + P_LEN / 2:
-                        ball["x"] = WIDTH - 22 - ball["radius"]  # 패들 좌측으로 위치 강제 보정
+                        ball["x"] = WIDTH - 22 - ball["radius"]
                         offset = (ball["y"] - pad_y) / (P_LEN / 2)
-                        adj_offset = max(-1.0, min(1.0, offset - 0.25))
-                        rebound_angle = adj_offset * (math.pi / 3.2)
+                        if abs(offset) < 0.22:
+                            offset = -0.35
+                        
+                        adj_offset = max(-1.0, min(1.0, offset - 0.2))
+                        rebound_angle = adj_offset * (math.pi / 2.9)
                         ball["vx"] = -BALL_BASE_SPEED * math.cos(rebound_angle)
                         ball["vy"] = BALL_BASE_SPEED * math.sin(rebound_angle)
-                        if abs(ball["vy"]) < 2.5:
-                            ball["vy"] = -2.8 if offset <= 0 else 2.8
-                        ball["vx"], ball["vy"] = enforce_speed(ball["vx"], ball["vy"])
+                        ball["vx"], ball["vy"] = enforce_non_vertical(ball["vx"], ball["vy"], "x")
                         step_vx = ball["vx"] / sub_steps
                         step_vy = ball["vy"] / sub_steps
+                        last_hitter = "right"
                     elif ball["x"] > WIDTH + 30:
+                        SCORES["right"] = max(0, SCORES["right"] - 200)  # 실점
                         reset_ball()
                         break
 
-                # 5. [핵심 개선] 정밀 Circle-AABB 최근접점 충돌 판정 (유령 반사 및 관통 완벽 차단)
-                hit_brick = None
+                # 5. 벽돌 정밀 충돌 판정 및 점수 계산
                 r = ball["radius"]
-                
                 for b in bricks:
                     if not b["alive"]:
                         continue
 
-                    # 사각형 내에서 공 중심과 가장 가까운 점(Closest Point) 계산
                     closest_x = max(b["x"], min(ball["x"], b["x"] + b["w"]))
                     closest_y = max(b["y"], min(ball["y"], b["y"] + b["h"]))
 
                     dist_x = ball["x"] - closest_x
                     dist_y = ball["y"] - closest_y
-                    distance_sq = (dist_x * dist_x) + (dist_y * dist_y)
 
-                    # 실제 원의 반지름 이내로 들어왔을 때만 진짜 충돌 인정 (유령 반사 방지)
-                    if distance_sq < (r * r):
-                        hit_brick = b
+                    if (dist_x * dist_x + dist_y * dist_y) < (r * r):
                         b["alive"] = False
+                        
+                        # [득점 시스템] 마지막 타격자에게 100점 가산
+                        if last_hitter in SCORES:
+                            SCORES[last_hitter] += 100
 
-                        # 충돌 깊이(침투량)에 따라 법선 방향 결정
                         overlap_left = (ball["x"] + r) - b["x"]
                         overlap_right = (b["x"] + b["w"]) - (ball["x"] - r)
                         overlap_top = (ball["y"] + r) - b["y"]
                         overlap_bottom = (b["y"] + b["h"]) - (ball["y"] - r)
 
-                        min_overlap_x = min(overlap_left, overlap_right)
-                        min_overlap_y = min(overlap_top, overlap_bottom)
-
-                        if min_overlap_x < min_overlap_y:
-                            # 좌우 측면 충돌
+                        if min(overlap_left, overlap_right) < min(overlap_top, overlap_bottom):
                             ball["vx"] = -ball["vx"]
                             step_vx = -step_vx
-                            # 파묻힘 방지 밀어내기
-                            if overlap_left < overlap_right:
-                                ball["x"] = b["x"] - r - 0.5
-                            else:
-                                ball["x"] = b["x"] + b["w"] + r + 0.5
+                            ball["x"] = b["x"] - r - 0.5 if overlap_left < overlap_right else b["x"] + b["w"] + r + 0.5
                         else:
-                            # 상하 면 충돌
                             ball["vy"] = -ball["vy"]
                             step_vy = -step_vy
-                            # 파묻힘 방지 밀어내기
-                            if overlap_top < overlap_bottom:
-                                ball["y"] = b["y"] - r - 0.5
-                            else:
-                                ball["y"] = b["y"] + b["h"] + r + 0.5
-                        
-                        # 1서브스텝 당 1개의 벽돌만 처리하고 즉시 루프 탈출 (이중 충돌 연산 왜곡 방지)
+                            ball["y"] = b["y"] - r - 0.5 if overlap_top < overlap_bottom else b["y"] + b["h"] + r + 0.5
                         break
 
-            # 스테이지 클리어 확인
+            # 스테이지 클리어
             if sum(1 for b in bricks if b["alive"]) == 0:
                 current_stage = (current_stage % TOTAL_STAGES) + 1
                 bricks = generate_stage(current_stage)
                 reset_ball()
 
-            # 인게임 상태 브로드캐스트
+            # 브로드캐스트
             bot_list = [role for role, ws in SLOTS.items() if ws is None]
             waiting_users = [info["name"] for ws, info in CONNECTED_CLIENTS.items() if info["state"] == "waiting"]
             
@@ -265,6 +273,7 @@ async def game_loop():
                 "ball": ball,
                 "paddles": paddle_positions,
                 "names": PLAYER_NAMES,
+                "scores": SCORES,
                 "bot_slots": bot_list,
                 "stage": current_stage,
                 "waiting_users": waiting_users,
@@ -317,8 +326,9 @@ async def handler(websocket):
                 await broadcast_lobby()
 
             elif msg_type == "start_game":
-                global game_started, current_stage, bricks
+                global game_started, current_stage, bricks, SCORES
                 current_stage = 1
+                SCORES = {"bottom": 0, "left": 0, "right": 0}  # 게임 시작 시 스코어 초기화
                 bricks = generate_stage(current_stage)
                 reset_ball()
                 game_started = True
@@ -356,7 +366,7 @@ async def handler(websocket):
 
 async def main():
     server = await websockets.serve(handler, "0.0.0.0", 8765)
-    print(f"[{VERSION_TITLE}] 서버 정상 가동...")
+    print(f"[{VERSION_TITLE}] 서버 가동 시작...")
     await asyncio.gather(server.wait_closed(), game_loop())
 
 if __name__ == "__main__":
