@@ -44,7 +44,7 @@
       border: 1px solid #334;
       border-radius: 8px;
       padding: 6px 10px;
-      margin-bottom: 6px;
+      margin-bottom: 5px;
       font-size: 12px;
       font-weight: bold;
     }
@@ -52,6 +52,39 @@
     .score-item.bottom { color: #00ffcc; }
     .score-item.left { color: #ff007f; }
     .score-item.right { color: #ffaa00; }
+
+    /* [상단 마법 충전 게이지바 UI] */
+    #chargeContainer {
+      width: min(92vw, 480px);
+      height: 14px;
+      background: #10121d;
+      border: 1px solid #ff00ea;
+      border-radius: 10px;
+      margin-bottom: 6px;
+      overflow: hidden;
+      position: relative;
+      display: none; /* 삼켰을 때만 표시 */
+      box-shadow: 0 0 10px rgba(255, 0, 234, 0.4);
+    }
+    #chargeBar {
+      width: 0%;
+      height: 100%;
+      background: linear-gradient(90deg, #ff00ea, #ffcc00);
+      box-shadow: 0 0 12px #ffcc00;
+      transition: width 0.04s linear;
+    }
+    #chargeText {
+      position: absolute;
+      top: 0; left: 0; width: 100%; height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      font-weight: 900;
+      color: #ffffff;
+      text-shadow: 0 0 3px #000;
+      letter-spacing: 0.5px;
+    }
 
     #waitingNoticeBanner {
       display: none;
@@ -126,7 +159,6 @@
       font-size: 12px;
     }
 
-    /* 속도 조절 UI */
     .speed-control-box {
       width: 86%;
       background: #1a1d2e;
@@ -229,13 +261,19 @@
   </style>
 </head>
 <body>
-  <div id="versionTitle">정통알카노이드 (포획회전 & 속도조절)</div>
+  <div id="versionTitle">정통알카노이드 (Orb Charge Gauge)</div>
   <div id="netStatus">🟡 Railway 서버 신호 연결 중...</div>
 
   <div id="scoreboard">
     <div class="score-item left" id="score-left">L(좌): 0</div>
     <div class="score-item bottom" id="score-bottom">B(하): 0</div>
     <div class="score-item right" id="score-right">R(우): 0</div>
+  </div>
+
+  <!-- [상단 마법 게이지 디스플레이] -->
+  <div id="chargeContainer">
+    <div id="chargeBar"></div>
+    <div id="chargeText">ORB CHARGING 0%</div>
   </div>
 
   <div id="waitingNoticeBanner">🔔 대기실에 참가자가 있습니다!</div>
@@ -331,7 +369,6 @@
         osc.stop(now + 0.09);
       } 
       else if (type === "catch") {
-        // 공 포획 시 자석 접촉음
         osc.type = "sine";
         osc.frequency.setValueAtTime(440, now);
         osc.frequency.exponentialRampToValueAtTime(880, now + 0.12);
@@ -341,7 +378,6 @@
         osc.stop(now + 0.12);
       }
       else if (type === "orb") {
-        // 회전 후 방출 워프음
         osc.type = "sawtooth";
         osc.frequency.setValueAtTime(950, now);
         osc.frequency.exponentialRampToValueAtTime(250, now + 0.22);
@@ -384,6 +420,10 @@
     const waitingNameInput = document.getElementById("waitingNameInput");
     const speedSlider = document.getElementById("speedSlider");
     const speedValue = document.getElementById("speedValue");
+
+    const chargeContainer = document.getElementById("chargeContainer");
+    const chargeBar = document.getElementById("chargeBar");
+    const chargeText = document.getElementById("chargeText");
 
     const scoreLeft = document.getElementById("score-left");
     const scoreBottom = document.getElementById("score-bottom");
@@ -485,6 +525,17 @@
           msg.bricks.forEach(id => deadBrickIds.add(id));
 
           if (msg.scores) updateScoreboard(msg.scores, playerNames);
+
+          // [마법 충전 게이지바 표시/갱신 처리]
+          if (orbData && orbData.holding) {
+            chargeContainer.style.display = "block";
+            const pct = Math.round(orbData.progress * 100);
+            chargeBar.style.width = `${pct}%`;
+            chargeText.innerText = `ORB CHARGING ${pct}%`;
+          } else {
+            chargeContainer.style.display = "none";
+            chargeBar.style.width = "0%";
+          }
 
           if (msg.pause_sec && msg.pause_sec > 0.05) {
             countdownOverlay.style.display = "flex";
@@ -641,7 +692,7 @@
         ctx.stroke();
         ctx.closePath();
 
-        // 마법구슬 본체 (포획 중일 때는 밝은 황금빛 충전 이펙트)
+        // 마법구슬
         ctx.beginPath();
         ctx.arc(orbData.x, orbData.y, 13, 0, Math.PI * 2);
         ctx.fillStyle = orbData.holding ? "#ffcc00" : "#ff00ea";
@@ -679,7 +730,7 @@
       const isBotRight = botSlots.includes("right");
       drawCurvedPaddle(canvas.width - 20, paddles.right - 35, 10, 70, isBotRight ? "#555" : "#ffaa00", playerNames.right);
 
-      // 공 (구슬에 붙어 회전 중일 때는 파동 글로우)
+      // 공
       ctx.beginPath();
       ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
       ctx.fillStyle = (orbData && orbData.holding) ? "#ffff55" : "#fff";
