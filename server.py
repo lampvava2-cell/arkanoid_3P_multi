@@ -10,7 +10,7 @@ import websockets
 WIDTH = 500
 HEIGHT = 500
 
-VERSION_TITLE = "정통알카노이드_특수아이템_버전17 (Hardened Brick & Magnet Paddle)"
+VERSION_TITLE = "정통알카노이드_블록피격수정_버전18"
 
 SLOTS = {"bottom": None, "left": None, "right": None}
 PLAYER_NAMES = {"bottom": "BOT", "left": "BOT", "right": "BOT"}
@@ -35,16 +35,15 @@ ai_offsets = {
     "right": 0.0
 }
 
-# [15초 특수 아이템: 자석 패들 상태 변수]
 magnet_active_until = {
     "bottom": 0.0,
     "left": 0.0,
     "right": 0.0
 }
 
-ball_stuck_to = None      # "bottom", "left", "right" 중 하나 또는 None
-ball_stuck_offset = 0.0   # 패들 중앙 기준 공이 붙은 상대적 위치
-bot_release_timer = 0.0   # 봇이 공을 잡았을 때 1초 후 자동 발사
+ball_stuck_to = None
+ball_stuck_offset = 0.0
+bot_release_timer = 0.0
 
 BALL_SPEED_LEVEL = 6
 BALL_BASE_SPEED = BALL_SPEED_LEVEL * 1.02
@@ -97,7 +96,7 @@ def generate_stage(stage_num):
     return new_bricks
 
 def restore_broken_bricks():
-    """깨진 블록의 20%를 HP=2 특수 강화 블록으로 부활"""
+    """깨진 블록 중 20%를 HP 2짜리 부활 블록으로 복원"""
     dead_bricks = [b for b in bricks if not b["alive"]]
     if not dead_bricks:
         return 0
@@ -124,7 +123,6 @@ def reset_ball():
     ai_offsets = {r: random.uniform(-24, 24) for r in ai_offsets}
 
 def release_stuck_ball(role):
-    """패들에 붙어있던 공을 발사"""
     global ball_stuck_to, ball
     if ball_stuck_to != role:
         return
@@ -229,7 +227,6 @@ async def game_loop():
                     charge_progress = 1.0
                     ai_offsets = {r: random.uniform(-24, 24) for r in ai_offsets}
 
-            # 패들에 공이 붙어있는 상태 처리
             elif ball_stuck_to:
                 if ball_stuck_to == "bottom":
                     ball["x"] = paddle_positions["bottom"] + ball_stuck_offset
@@ -241,7 +238,6 @@ async def game_loop():
                     ball["x"] = WIDTH - 22 - ball["radius"]
                     ball["y"] = paddle_positions["right"] + ball_stuck_offset
 
-                # BOT이 잡고 있는 경우 1초 후 자동 릴리즈
                 if SLOTS[ball_stuck_to] is None and now >= bot_release_timer:
                     release_stuck_ball(ball_stuck_to)
                     sound_event = "paddle"
@@ -257,7 +253,7 @@ async def game_loop():
                     ball["x"] += step_vx
                     ball["y"] += step_vy
 
-                    # 구슬 접촉 -> 20% 강화 블록 복원
+                    # 구슬 접촉 -> 20% 복원
                     d_orb = math.hypot(ball["x"] - orb_x, ball["y"] - orb_y)
                     if d_orb <= (ball["radius"] + orb["radius"]):
                         orb["holding_ball"] = True
@@ -283,7 +279,6 @@ async def game_loop():
                             last_hitter = "bottom"
                             offset = ball["x"] - pad_x
 
-                            # 15초 특수 자석 모드 체크
                             if now < magnet_active_until["bottom"]:
                                 ball_stuck_to = "bottom"
                                 ball_stuck_offset = offset
@@ -361,7 +356,7 @@ async def game_loop():
                             reset_ball()
                             break
 
-                    # 5. 벽돌 충돌 (HP 2 판정 및 15초 특수 버프 부여)
+                    # 5. 벽돌 충돌 및 HP 감량 판정
                     r = ball["radius"]
                     for b in bricks:
                         if not b["alive"]:
@@ -374,6 +369,7 @@ async def game_loop():
                         dist_y = ball["y"] - closest_y
 
                         if (dist_x * dist_x + dist_y * dist_y) < (r * r):
+                            # [핵심] HP 1 감소
                             b["hp"] -= 1
 
                             if b["hp"] <= 0:
@@ -382,12 +378,12 @@ async def game_loop():
                                 if last_hitter in SCORES:
                                     SCORES[last_hitter] += 100
 
-                                # 강화 블록을 최종 파괴한 자에게 15초 특수 아이템 지급
+                                # 부활 블록을 완전히 파괴한 플레이어에게 15초 특수기능 부여
                                 if b["hardened"] and last_hitter:
                                     magnet_active_until[last_hitter] = now + 15.0
                                     sound_event = "powerup"
                             else:
-                                # 1회 피격 (아직 살아있음)
+                                # 부활 블록 1회 타격 (HP 1 남음)
                                 sound_event = "hard_hit"
 
                             overlap_left = (ball["x"] + r) - b["x"]
@@ -415,10 +411,17 @@ async def game_loop():
             waiting_users = [info["name"] for ws, info in CONNECTED_CLIENTS.items() if info.get("state") == "waiting"]
             remaining_pause = max(0.0, pause_until - now)
 
-            # 살아있는 벽돌들의 데이터 (ID, HP, 강화여부)
-            brick_sync_list = [{"id": b["id"], "hp": b["hp"], "hardened": b["hardened"]} for b in bricks if b["alive"]]
+            # 살아있는 벽돌 목록 완전 전송
+            alive_bricks_list = [{
+                "id": b["id"],
+                "x": b["x"],
+                "y": b["y"],
+                "w": b["w"],
+                "h": b["h"],
+                "hp": b["hp"],
+                "hardened": b["hardened"]
+            } for b in bricks if b["alive"]]
 
-            # 패들별 특수 아이템 잔여 시간
             magnet_remain = {r: max(0.0, magnet_active_until[r] - now) for r in magnet_active_until}
 
             payload = json.dumps({
@@ -430,7 +433,7 @@ async def game_loop():
                 "bot_slots": bot_list,
                 "stage": current_stage,
                 "waiting_users": waiting_users,
-                "bricks_data": brick_sync_list,
+                "active_bricks": alive_bricks_list,
                 "pause_sec": remaining_pause,
                 "sound": sound_event,
                 "magnet_remain": magnet_remain,
@@ -471,14 +474,12 @@ async def handler(websocket):
             await websocket.send(json.dumps({
                 "type": "game_start",
                 "stage": current_stage,
-                "bricks": bricks,
                 "assigned_role": assigned_role
             }))
         else:
             CONNECTED_CLIENTS[websocket] = {"role": None, "name": new_user_name, "state": "waiting"}
             await websocket.send(json.dumps({
                 "type": "waiting_room_notice",
-                "bricks": bricks,
                 "stage": current_stage
             }))
     else:
@@ -536,8 +537,7 @@ async def handler(websocket):
 
                     init_payload = json.dumps({
                         "type": "game_start",
-                        "stage": current_stage,
-                        "bricks": bricks
+                        "stage": current_stage
                     })
                     for ws in list(CONNECTED_CLIENTS.keys()):
                         try:
@@ -553,7 +553,6 @@ async def handler(websocket):
                         paddle_positions[role] = max(35, min(max_limit, float(data["pos"])))
 
                 elif msg_type == "release_ball":
-                    # 붙어있는 공 터치 발사 요청
                     role = CONNECTED_CLIENTS[websocket]["role"]
                     if role and ball_stuck_to == role:
                         release_stuck_ball(role)
