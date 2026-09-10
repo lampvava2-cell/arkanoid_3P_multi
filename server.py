@@ -1,13 +1,15 @@
 import asyncio
 import json
 import math
+import os
 import random
 import websockets
 
+# 완벽한 1:1 정사각 가상 해상도 (500 x 500)
 WIDTH = 500
 HEIGHT = 500
 
-VERSION_TITLE = "빵패들_사운드카운트버전9 (Puffy Paddle & SFX)"
+VERSION_TITLE = "포트자동연결_완성버전9.2 (Port Auto Bind & SFX)"
 
 SLOTS = {"bottom": None, "left": None, "right": None}
 PLAYER_NAMES = {"bottom": "BOT", "left": "BOT", "right": "BOT"}
@@ -42,6 +44,7 @@ def generate_stage(stage_num):
     brick_id = 0
     center_x, center_y = WIDTH / 2, HEIGHT / 2 - 20
     if stage_num == 1:
+        # 스테이지 1: 6x6 정사각 중앙 배치
         rows, cols = 6, 6
         start_x = (WIDTH - (cols * 36)) / 2 + 3
         start_y = (HEIGHT - (rows * 22)) / 2 - 20
@@ -50,12 +53,14 @@ def generate_stage(stage_num):
                 new_bricks.append({"id": brick_id, "x": start_x + c * 36, "y": start_y + r * 22, "w": 30, "h": 14, "alive": True})
                 brick_id += 1
     elif stage_num == 2:
+        # 스테이지 2: 십자형 정방 대칭
         for r in range(7):
             for c in range(7):
                 if r == 3 or c == 3 or (abs(r - 3) + abs(c - 3) <= 2):
                     new_bricks.append({"id": brick_id, "x": center_x - 126 + c * 36, "y": center_y - 77 + r * 22, "w": 30, "h": 14, "alive": True})
                     brick_id += 1
     else:
+        # 스테이지 3: 8x8 다이아몬드 요새
         for r in range(8):
             for c in range(8):
                 if r in [0, 7] or c in [0, 7] or (r in [3, 4] and c in [3, 4]):
@@ -157,14 +162,13 @@ async def game_loop():
                     step_vy = ball["vy"] / sub_steps
                     sound_events.append("wall")
 
-                # 2. 하단 패들 충돌 (부풀어 오른 빵 곡면 반사)
+                # 2. 하단 패들 충돌 (빵 돔 곡면 반사)
                 if ball["y"] + ball["radius"] >= HEIGHT - 24:
                     pad_x = paddle_positions["bottom"]
                     if pad_x - P_LEN / 2 <= ball["x"] <= pad_x + P_LEN / 2:
                         ball["y"] = HEIGHT - 24 - ball["radius"]
                         offset = (ball["x"] - pad_x) / (P_LEN / 2)
                         
-                        # 빵처럼 볼록한 곡면 반사각 증폭
                         if abs(offset) < 0.2:
                             offset = 0.35 if offset >= 0 else -0.35
                         rebound_angle = offset * (math.pi / 2.7)
@@ -181,7 +185,7 @@ async def game_loop():
                         reset_ball()
                         break
 
-                # 3. 좌측 패들 충돌 (빵 곡면 반사)
+                # 3. 좌측 패들 충돌 (빵 돔 곡면 반사)
                 if ball["x"] - ball["radius"] <= 24:
                     pad_y = paddle_positions["left"]
                     if pad_y - P_LEN / 2 <= ball["y"] <= pad_y + P_LEN / 2:
@@ -204,7 +208,7 @@ async def game_loop():
                         reset_ball()
                         break
 
-                # 4. 우측 패들 충돌 (빵 곡면 반사)
+                # 4. 우측 패들 충돌 (빵 돔 곡면 반사)
                 if ball["x"] + ball["radius"] >= WIDTH - 24:
                     pad_y = paddle_positions["right"]
                     if pad_y - P_LEN / 2 <= ball["y"] <= pad_y + P_LEN / 2:
@@ -227,7 +231,7 @@ async def game_loop():
                         reset_ball()
                         break
 
-                # 5. 벽돌 충돌
+                # 5. 벽돌 충돌 및 점수
                 r = ball["radius"]
                 for b in bricks:
                     if not b["alive"]:
@@ -259,7 +263,7 @@ async def game_loop():
                             ball["y"] = b["y"] - r - 0.5 if overlap_top < overlap_bottom else b["y"] + b["h"] + r + 0.5
                         break
 
-            # 스테이지 완료
+            # 스테이지 클리어 확인
             if sum(1 for b in bricks if b["alive"]) == 0:
                 current_stage = (current_stage % TOTAL_STAGES) + 1
                 bricks = generate_stage(current_stage)
@@ -392,8 +396,10 @@ async def handler(websocket):
         await broadcast_lobby()
 
 async def main():
-    server = await websockets.serve(handler, "0.0.0.0", 8765)
-    print(f"[{VERSION_TITLE}] 서버 가동 중...")
+    # [핵심] Render의 동적 웹 포트($PORT) 자동 읽기 (기본값 8765)
+    port = int(os.environ.get("PORT", 8765))
+    server = await websockets.serve(handler, "0.0.0.0", port)
+    print(f"[{VERSION_TITLE}] 서버 바인딩 성공! 포트: {port}")
     await asyncio.gather(server.wait_closed(), game_loop())
 
 if __name__ == "__main__":
