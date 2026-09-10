@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>3인멀티알카노이드(정사각형 & 대기실)</title>
+  <title>3인 멀티 알카노이드 (정밀 반사 & 스코어)</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -24,17 +24,34 @@
       font-size: 13px;
       color: #00ffcc;
       font-weight: bold;
-      margin-bottom: 8px;
+      margin-bottom: 6px;
       letter-spacing: 0.5px;
     }
-    /* 대기실 접속자 알림 배너 (플레이어 화면용) */
+    /* 실시간 3인 스코어보드 바 */
+    #scoreboard {
+      display: flex;
+      justify-content: space-around;
+      width: min(92vw, 480px);
+      background: #181b29;
+      border: 1px solid #334;
+      border-radius: 8px;
+      padding: 6px 10px;
+      margin-bottom: 6px;
+      font-size: 12px;
+      font-weight: bold;
+    }
+    .score-item { display: flex; gap: 6px; }
+    .score-item.bottom { color: #00ffcc; }
+    .score-item.left { color: #ff007f; }
+    .score-item.right { color: #ffaa00; }
+
     #waitingNoticeBanner {
       display: none;
       background: rgba(255, 170, 0, 0.25);
       border: 1px solid #ffaa00;
       color: #ffcc00;
       font-size: 12px;
-      padding: 5px 12px;
+      padding: 4px 12px;
       border-radius: 20px;
       margin-bottom: 6px;
       animation: pulse 1.5s infinite;
@@ -43,7 +60,8 @@
       0%, 100% { opacity: 0.8; }
       50% { opacity: 1; transform: scale(1.02); }
     }
-    /* [핵심] 완전 1:1 정사각형 캔버스 컨테이너 */
+
+    /* 1:1 완벽 정사각 캔버스 */
     #container {
       position: relative;
       width: min(92vw, 480px);
@@ -62,7 +80,6 @@
       aspect-ratio: 1 / 1;
     }
     
-    /* 로비 & 대기실 오버레이 공통 */
     .overlay {
       position: absolute;
       top: 0; left: 0; width: 100%; height: 100%;
@@ -76,7 +93,6 @@
     }
     h2 { margin: 0 0 12px 0; color: #fff; font-size: 18px; }
     
-    /* 닉네임 입력 */
     .name-box {
       display: flex;
       gap: 6px;
@@ -139,11 +155,7 @@
       display: none;
       z-index: 5;
     }
-    
-    /* 3번째 대기자 전용 화면 */
-    #waitingOverlay {
-      display: none;
-    }
+    #waitingOverlay { display: none; }
     .waiting-spinner {
       width: 38px;
       height: 38px;
@@ -157,16 +169,24 @@
   </style>
 </head>
 <body>
-  <div id="versionTitle">정밀물리엔진버전7 (True Square & Waiting Room)</div>
+  <div id="versionTitle">무수직반사_스코어버전8 (Angle Forced & Score System)</div>
+
+  <!-- 스코어보드 -->
+  <div id="scoreboard">
+    <div class="score-item left" id="score-left">L(좌): 0</div>
+    <div class="score-item bottom" id="score-bottom">B(하): 0</div>
+    <div class="score-item right" id="score-right">R(우): 0</div>
+  </div>
+
   <div id="waitingNoticeBanner">🔔 대기실에 참가자가 있습니다!</div>
   
   <div id="container">
     <div id="stageBadge">STAGE 1 / 3</div>
     <canvas id="game" width="500" height="500"></canvas>
 
-    <!-- 1. 기본 로비 (자리 선택) -->
+    <!-- 로비 -->
     <div id="lobbyOverlay" class="overlay">
-      <h2>3인 알카노이드 로비</h2>
+      <h2>포지션 선택 및 참가</h2>
       <div class="name-box">
         <input type="text" id="nameInput" placeholder="닉네임 입력 (최대 6자)" maxlength="6">
         <button onclick="changeName()">확인</button>
@@ -185,14 +205,14 @@
       <button id="startBtn" onclick="requestStart()">GAME START</button>
     </div>
 
-    <!-- 2. 난입자 대기실 화면 (3번째 접속자) -->
+    <!-- 대기실 -->
     <div id="waitingOverlay" class="overlay">
       <div class="waiting-spinner"></div>
       <h2 style="color:#ffcc00; margin-bottom:8px;">게임이 이미 진행 중입니다</h2>
       <p style="font-size:13px; color:#aaa; text-align:center; line-height:1.5; margin:0 0 16px 0;">
-        현재 2명의 플레이어가 대결 중입니다.<br>
-        <strong>[대기실]</strong>에서 잠시 관전하며 대기해 주세요.<br>
-        다음 게임 시작 시 바로 참여 가능합니다!
+        현재 대결 중인 라운드가 진행 중입니다.<br>
+        <strong>[대기실]</strong>에서 관전하며 대기해 주세요.<br>
+        다음 라운드 시작 시 즉시 참여할 수 있습니다!
       </p>
       <div class="name-box" style="width:75%;">
         <input type="text" id="waitingNameInput" placeholder="내 닉네임 설정" maxlength="6">
@@ -212,6 +232,10 @@
     const nameInput = document.getElementById("nameInput");
     const waitingNameInput = document.getElementById("waitingNameInput");
 
+    const scoreLeft = document.getElementById("score-left");
+    const scoreBottom = document.getElementById("score-bottom");
+    const scoreRight = document.getElementById("score-right");
+
     const WS_URL = "wss://arkanoid-3p-multi.onrender.com";
     let ws = null;
     let myRole = null;
@@ -228,6 +252,12 @@
     let lastTouchX = null;
     let lastTouchY = null;
 
+    function updateScoreboard(scores, names) {
+      scoreBottom.innerText = `${names.bottom}: ${scores.bottom}`;
+      scoreLeft.innerText = `${names.left}: ${scores.left}`;
+      scoreRight.innerText = `${names.right}: ${scores.right}`;
+    }
+
     function connectSocket() {
       ws = new WebSocket(WS_URL);
 
@@ -241,17 +271,16 @@
         if (msg.type === "lobby_state") {
           versionTitle.innerText = `[ ${msg.title} ]`;
           updateLobbyUI(msg.slots);
+          if (msg.scores) updateScoreboard(msg.scores, playerNames);
 
-          // 대기자 알림 배너 갱신
           if (msg.waiting_users && msg.waiting_users.length > 0 && myRole) {
             waitingNoticeBanner.style.display = "block";
-            waitingNoticeBanner.innerText = `🔔 '${msg.waiting_users.join(", ")}' 님이 대기실에서 기다리고 있습니다!`;
+            waitingNoticeBanner.innerText = `🔔 '${msg.waiting_users.join(", ")}' 님이 대기실 대기 중!`;
           } else {
             waitingNoticeBanner.style.display = "none";
           }
         } 
         else if (msg.type === "waiting_room_notice") {
-          // 3번째로 뒤늦게 접속한 유저를 위한 대기실 모드 가동
           lobbyOverlay.style.display = "none";
           waitingOverlay.style.display = "flex";
           stageBadge.style.display = "block";
@@ -279,10 +308,11 @@
           stageBadge.innerText = `STAGE ${msg.stage} / 3`;
           msg.bricks.forEach(id => deadBrickIds.add(id));
 
-          // 인게임 중 대기자 표시
+          if (msg.scores) updateScoreboard(msg.scores, playerNames);
+
           if (msg.waiting_users && msg.waiting_users.length > 0 && myRole) {
             waitingNoticeBanner.style.display = "block";
-            waitingNoticeBanner.innerText = `🔔 '${msg.waiting_users.join(", ")}' 님이 대기실에서 대기 중!`;
+            waitingNoticeBanner.innerText = `🔔 '${msg.waiting_users.join(", ")}' 님이 대기실 대기 중!`;
           } else {
             waitingNoticeBanner.style.display = "none";
           }
@@ -342,7 +372,6 @@
       });
     }
 
-    // 상대 터치 드래그 (손가락 가림 방지)
     canvas.addEventListener("touchstart", (e) => {
       const touch = e.touches[0];
       lastTouchX = touch.clientX;
@@ -387,7 +416,6 @@
       ctx.fill();
       ctx.closePath();
 
-      // 패들 옆 닉네임 라벨링
       ctx.fillStyle = "#fff";
       ctx.font = "bold 11px sans-serif";
       if (w > h) {
@@ -402,11 +430,9 @@
     function render() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      // 상단 천장
       ctx.fillStyle = "#333";
       ctx.fillRect(0, 0, canvas.width, 10);
 
-      // 벽돌
       bricks.forEach(b => {
         if (!deadBrickIds.has(b.id)) {
           ctx.fillStyle = "#2c5282";
@@ -416,7 +442,6 @@
         }
       });
 
-      // 패들 3종
       const isBotBottom = botSlots.includes("bottom");
       drawCurvedPaddle(paddles.bottom - 35, canvas.height - 20, 70, 10, isBotBottom ? "#555" : "#00ffcc", playerNames.bottom);
 
@@ -426,7 +451,6 @@
       const isBotRight = botSlots.includes("right");
       drawCurvedPaddle(canvas.width - 20, paddles.right - 35, 10, 70, isBotRight ? "#555" : "#ffaa00", playerNames.right);
 
-      // 공
       ctx.beginPath();
       ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
       ctx.fillStyle = "#fff";
