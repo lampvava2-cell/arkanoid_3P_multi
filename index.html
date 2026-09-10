@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>3인 멀티 알카노이드</title>
+  <title>3인 멀티 알카노이드 (정사각형)</title>
   <style>
     body {
       margin: 0;
@@ -22,17 +22,20 @@
       font-size: 13px;
       color: #00ffcc;
       font-weight: bold;
-      margin-bottom: 6px;
+      margin-bottom: 8px;
       letter-spacing: 0.5px;
     }
+    /* 모바일 화면 너비에 맞춘 완벽한 정사각형 컨테이너 */
     #container {
       position: relative;
-      width: 380px;
-      height: 580px;
+      width: 92vw;
+      height: 92vw;
+      max-width: 500px;
+      max-height: 500px;
       border: 2px solid #333;
-      box-shadow: 0 0 20px rgba(0,255,255,0.15);
+      box-shadow: 0 0 25px rgba(0,255,255,0.15);
       background: #151722;
-      border-radius: 8px;
+      border-radius: 12px;
       overflow: hidden;
     }
     canvas { width: 100%; height: 100%; display: block; }
@@ -40,27 +43,27 @@
     #lobbyOverlay {
       position: absolute;
       top: 0; left: 0; width: 100%; height: 100%;
-      background: rgba(13, 14, 21, 0.94);
+      background: rgba(13, 14, 21, 0.95);
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
       z-index: 10;
     }
-    h2 { margin: 0 0 16px 0; color: #fff; font-size: 19px; }
+    h2 { margin: 0 0 14px 0; color: #fff; font-size: 18px; }
     #connectionInfo {
       font-size: 12px;
       color: #ffaa00;
       margin-bottom: 12px;
       text-align: center;
     }
-    .role-grid { display: flex; flex-direction: column; gap: 10px; width: 82%; margin-bottom: 20px; }
+    .role-grid { display: flex; flex-direction: column; gap: 8px; width: 84%; margin-bottom: 16px; }
     .role-btn {
-      padding: 13px;
+      padding: 12px;
       border: 2px solid #444;
       background: #202433;
       color: #fff;
-      font-size: 14px;
+      font-size: 13px;
       font-weight: bold;
       border-radius: 8px;
       display: flex;
@@ -69,13 +72,13 @@
     }
     .role-btn.active { border-color: #00ffcc; background: #123838; color: #00ffcc; }
     #startBtn {
-      width: 82%;
-      padding: 14px;
+      width: 84%;
+      padding: 13px;
       background: #00d2ff;
       border: none;
       border-radius: 8px;
       color: #000;
-      font-size: 16px;
+      font-size: 15px;
       font-weight: bold;
       cursor: pointer;
     }
@@ -88,30 +91,37 @@
       font-weight: bold;
       display: none;
     }
+    #guideTip {
+      margin-top: 10px;
+      font-size: 11px;
+      color: #888;
+      text-align: center;
+    }
   </style>
 </head>
 <body>
-  <div id="versionTitle">무한핑퐁방지버전4 (Curved Paddle & Anti-Stall)</div>
+  <div id="versionTitle">정사각형_상대터치버전5 (Square & Relative Touch)</div>
   
   <div id="container">
     <div id="stageBadge">STAGE 1 / 3</div>
-    <canvas id="game" width="400" height="600"></canvas>
+    <canvas id="game" width="500" height="500"></canvas>
 
     <div id="lobbyOverlay">
-      <h2>플레이어 위치 지정</h2>
+      <h2>포지션 선택</h2>
       <div id="connectionInfo">서버 신호 연결 대기 중...</div>
       <div class="role-grid">
         <button class="role-btn" id="btn-bottom" onclick="selectRole('bottom')">
-          <span>하단 (BOTTOM)</span> <span id="label-bottom">BOT</span>
+          <span>하단 (가로 제어)</span> <span id="label-bottom">BOT</span>
         </button>
         <button class="role-btn" id="btn-left" onclick="selectRole('left')">
-          <span>좌측 (LEFT)</span> <span id="label-left">BOT</span>
+          <span>좌측 (세로 제어)</span> <span id="label-left">BOT</span>
         </button>
         <button class="role-btn" id="btn-right" onclick="selectRole('right')">
-          <span>우측 (RIGHT)</span> <span id="label-right">BOT</span>
+          <span>우측 (세로 제어)</span> <span id="label-right">BOT</span>
         </button>
       </div>
       <button id="startBtn" onclick="requestStart()">GAME START</button>
+      <div id="guideTip">※ 화면 아무 곳이나 드래그해도 패들이 움직입니다 (손가락 가림 방지)</div>
     </div>
   </div>
 
@@ -128,9 +138,13 @@
     let myRole = null;
     let bricks = [];
     let deadBrickIds = new Set();
-    let ball = { x: 200, y: 380, radius: 8 };
-    let paddles = { bottom: 200, left: 300, right: 300 };
+    let ball = { x: 250, y: 350, radius: 8 };
+    let paddles = { bottom: 250, left: 250, right: 250 };
     let botSlots = ["bottom", "left", "right"];
+
+    // 상대 드래그 터치 처리를 위한 마지막 터치 좌표 저장
+    let lastTouchX = null;
+    let lastTouchY = null;
 
     function connectSocket() {
       connInfo.innerText = "서버 연결 시도 중...";
@@ -156,7 +170,12 @@
           deadBrickIds.clear();
         } else if (msg.type === "game_update") {
           ball = msg.ball;
-          paddles = msg.paddles;
+          // 내 패들은 부드러운 로컬 조작을 위해 서버 덮어쓰기 대신 다른 플레이어만 갱신
+          for (let r of ["bottom", "left", "right"]) {
+            if (r !== myRole) {
+              paddles[r] = msg.paddles[r];
+            }
+          }
           botSlots = msg.bot_slots || [];
           stageBadge.innerText = `STAGE ${msg.stage} / 3`;
           msg.bricks.forEach(id => deadBrickIds.add(id));
@@ -165,7 +184,7 @@
       };
 
       ws.onclose = () => {
-        connInfo.innerText = "서버와 연결 끊김. 3초 후 재접속 시도...";
+        connInfo.innerText = "서버 연결 끊김. 3초 후 재접속 시도...";
         connInfo.style.color = "#ff4444";
         setTimeout(connectSocket, 3000);
       };
@@ -200,30 +219,45 @@
       });
     }
 
-    function handleTouch(e) {
-      if (!myRole || !ws || ws.readyState !== WebSocket.OPEN) return;
-      const rect = canvas.getBoundingClientRect();
-      const scaleX = canvas.width / rect.width;
-      const scaleY = canvas.height / rect.height;
+    // [손가락 가림 방지] 상대적 드래그(Relative Drag) 터치 핸들러
+    canvas.addEventListener("touchstart", (e) => {
       const touch = e.touches[0];
-      const touchX = (touch.clientX - rect.left) * scaleX;
-      const touchY = (touch.clientY - rect.top) * scaleY;
+      lastTouchX = touch.clientX;
+      lastTouchY = touch.clientY;
+    }, { passive: false });
 
-      let pos = 0;
+    canvas.addEventListener("touchmove", (e) => {
+      e.preventDefault();
+      if (!myRole || !ws || ws.readyState !== WebSocket.OPEN || lastTouchX === null) return;
+
+      const touch = e.touches[0];
+      const deltaX = touch.clientX - lastTouchX;
+      const deltaY = touch.clientY - lastTouchY;
+      lastTouchX = touch.clientX;
+      lastTouchY = touch.clientY;
+
+      // 캔버스 크기 대비 비율 계산
+      const rect = canvas.getBoundingClientRect();
+      const scale = canvas.width / rect.width;
+
       if (myRole === "bottom") {
-        pos = Math.max(35, Math.min(365, touchX));
-      } else {
-        pos = Math.max(35, Math.min(565, touchY));
+        paddles.bottom = Math.max(35, Math.min(465, paddles.bottom + deltaX * scale * 1.3));
+        ws.send(JSON.stringify({ type: "move", pos: paddles.bottom }));
+      } else if (myRole === "left") {
+        paddles.left = Math.max(35, Math.min(465, paddles.left + deltaY * scale * 1.3));
+        ws.send(JSON.stringify({ type: "move", pos: paddles.left }));
+      } else if (myRole === "right") {
+        paddles.right = Math.max(35, Math.min(465, paddles.right + deltaY * scale * 1.3));
+        ws.send(JSON.stringify({ type: "move", pos: paddles.right }));
       }
+    }, { passive: false });
 
-      ws.send(JSON.stringify({ type: "move", pos: pos }));
-    }
+    canvas.addEventListener("touchend", () => {
+      lastTouchX = null;
+      lastTouchY = null;
+    });
 
-    canvas.addEventListener("touchmove", handleTouch, { passive: false });
-    canvas.addEventListener("touchstart", handleTouch, { passive: false });
-
-    // 둥근 캡슐형(볼록) 패들 렌더링 헬퍼 함수
-    function drawCurvedPaddle(x, y, w, h, color, isVertical) {
+    function drawCurvedPaddle(x, y, w, h, color) {
       ctx.fillStyle = color;
       ctx.beginPath();
       const r = Math.min(w, h) / 2;
@@ -249,15 +283,15 @@
         }
       });
 
-      // 둥근 볼록 패들 3종
+      // 패들 3종 (길이 70 균일)
       const isBotBottom = botSlots.includes("bottom");
-      drawCurvedPaddle(paddles.bottom - 32.5, canvas.height - 20, 65, 10, isBotBottom ? "#555" : "#00ffcc", false);
+      drawCurvedPaddle(paddles.bottom - 35, canvas.height - 20, 70, 10, isBotBottom ? "#555" : "#00ffcc");
 
       const isBotLeft = botSlots.includes("left");
-      drawCurvedPaddle(10, paddles.left - 32.5, 10, 65, isBotLeft ? "#555" : "#ff007f", true);
+      drawCurvedPaddle(10, paddles.left - 35, 10, 70, isBotLeft ? "#555" : "#ff007f");
 
       const isBotRight = botSlots.includes("right");
-      drawCurvedPaddle(canvas.width - 20, paddles.right - 32.5, 10, 65, isBotRight ? "#555" : "#ffaa00", true);
+      drawCurvedPaddle(canvas.width - 20, paddles.right - 35, 10, 70, isBotRight ? "#555" : "#ffaa00");
 
       // 공
       ctx.beginPath();
