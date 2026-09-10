@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>3인 멀티 알카노이드 (Railway 초고속 연결)</title>
+  <title>3인 멀티 알카노이드 (Hot-Join & 2s Delay)</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -173,10 +173,36 @@
       margin-bottom: 16px;
     }
     @keyframes spin { 100% { transform: rotate(360deg); } }
+
+    /* 2초 카운트다운 오버레이 */
+    #countdownOverlay {
+      display: none;
+      position: absolute;
+      top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0, 0, 0, 0.45);
+      z-index: 8;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+    }
+    #countdownText {
+      font-size: 58px;
+      font-weight: 900;
+      color: #00ffcc;
+      text-shadow: 0 0 20px #00ffcc;
+    }
+    #countdownSub {
+      font-size: 14px;
+      color: #fff;
+      margin-top: 6px;
+      font-weight: bold;
+    }
   </style>
 </head>
 <body>
-  <div id="versionTitle">무수직반사_스코어버전8 (Railway 연결)</div>
+  <div id="versionTitle">무수직반사_스코어버전9 (Hot-Join & 2s Delay)</div>
   <div id="netStatus">🟡 Railway 서버 신호 연결 중...</div>
 
   <div id="scoreboard">
@@ -190,6 +216,11 @@
   <div id="container">
     <div id="stageBadge">STAGE 1 / 3</div>
     <canvas id="game" width="500" height="500"></canvas>
+
+    <div id="countdownOverlay" style="display: none;">
+      <div id="countdownText">2</div>
+      <div id="countdownSub">새 플레이어 참여! 준비하세요</div>
+    </div>
 
     <div id="lobbyOverlay" class="overlay">
       <h2>포지션 선택 및 참가</h2>
@@ -213,11 +244,11 @@
 
     <div id="waitingOverlay" class="overlay">
       <div class="waiting-spinner"></div>
-      <h2 style="color:#ffcc00; margin-bottom:8px;">게임이 이미 진행 중입니다</h2>
+      <h2 style="color:#ffcc00; margin-bottom:8px;">자리가 꽉 차있습니다</h2>
       <p style="font-size:13px; color:#aaa; text-align:center; line-height:1.5; margin:0 0 16px 0;">
-        현재 대결 중인 라운드가 진행 중입니다.<br>
+        현재 3명의 플레이어가 대결 중입니다.<br>
         <strong>[대기실]</strong>에서 관전하며 대기해 주세요.<br>
-        다음 라운드 시작 시 즉시 참여할 수 있습니다!
+        누군가 퇴장하면 다음 라운드에 즉시 참여할 수 있습니다!
       </p>
       <div class="name-box" style="width:75%;">
         <input type="text" id="waitingNameInput" placeholder="내 닉네임 설정" maxlength="6">
@@ -234,6 +265,9 @@
     const lobbyOverlay = document.getElementById("lobbyOverlay");
     const waitingOverlay = document.getElementById("waitingOverlay");
     const waitingNoticeBanner = document.getElementById("waitingNoticeBanner");
+    const countdownOverlay = document.getElementById("countdownOverlay");
+    const countdownText = document.getElementById("countdownText");
+    const countdownSub = document.getElementById("countdownSub");
     const stageBadge = document.getElementById("stageBadge");
     const nameInput = document.getElementById("nameInput");
     const waitingNameInput = document.getElementById("waitingNameInput");
@@ -242,7 +276,6 @@
     const scoreBottom = document.getElementById("score-bottom");
     const scoreRight = document.getElementById("score-right");
 
-    // [Railway 전용 도메인 설정]
     const WS_URL = "wss://arkanoid3pmulti-production.up.railway.app";
     let ws = null;
     let myRole = "bottom";
@@ -300,14 +333,15 @@
           lobbyOverlay.style.display = "none";
           waitingOverlay.style.display = "flex";
           stageBadge.style.display = "block";
-          stageBadge.innerText = `STAGE ${msg.stage} / 3 (관전 대기 중)`;
+          stageBadge.innerText = `STAGE ${msg.stage} / 3 (관전 중)`;
           bricks = msg.bricks;
         } 
         else if (msg.type === "game_start") {
-          if (myRole) {
-            lobbyOverlay.style.display = "none";
-            waitingOverlay.style.display = "none";
+          if (msg.assigned_role) {
+            myRole = msg.assigned_role;
           }
+          lobbyOverlay.style.display = "none";
+          waitingOverlay.style.display = "none";
           stageBadge.style.display = "block";
           bricks = msg.bricks;
           deadBrickIds.clear();
@@ -326,12 +360,14 @@
 
           if (msg.scores) updateScoreboard(msg.scores, playerNames);
 
-          if (msg.waiting_users && msg.waiting_users.length > 0 && myRole) {
-            waitingNoticeBanner.style.display = "block";
-            waitingNoticeBanner.innerText = `🔔 '${msg.waiting_users.join(", ")}' 님이 대기실 대기 중!`;
+          // 2초 카운트다운 처리
+          if (msg.pause_sec && msg.pause_sec > 0.05) {
+            countdownOverlay.style.display = "flex";
+            countdownText.innerText = Math.ceil(msg.pause_sec);
           } else {
-            waitingNoticeBanner.style.display = "none";
+            countdownOverlay.style.display = "none";
           }
+
           render();
         }
       };
@@ -372,7 +408,7 @@
 
     function requestStart() {
       if (!ws || ws.readyState !== WebSocket.OPEN) {
-        alert("서버 연결 중입니다. 상단 초록불이 들어온 후 눌러주세요.");
+        alert("서버 연결 중입니다. 초록불이 들어온 후 눌러주세요.");
         return;
       }
       changeName();
