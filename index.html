@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>3인 멀티 알카노이드</title>
+  <title>3인 멀티 알카노이드 (3대 특수기능)</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -158,7 +158,6 @@
       font-size: 12px;
     }
 
-    /* 속도 조절 듀얼 패널 */
     .sliders-panel {
       width: 88%;
       display: flex;
@@ -266,7 +265,7 @@
   </style>
 </head>
 <body>
-  <div id="versionTitle">정통알카노이드 (구슬정밀판정 & 속도조절)</div>
+  <div id="versionTitle">정통알카노이드 (3대 특수기능 시스템)</div>
   <div id="netStatus">🟡 Railway 서버 신호 연결 중...</div>
 
   <div id="scoreboard">
@@ -298,7 +297,6 @@
         <button type="button" onclick="changeName()">확인</button>
       </div>
 
-      <!-- 공 속도 & 마법구슬 속도 듀얼 슬라이더 -->
       <div class="sliders-panel">
         <div class="speed-control-box">
           <div class="speed-labels">
@@ -382,6 +380,16 @@
         gain.gain.linearRampToValueAtTime(0.01, now + 0.09);
         osc.start(now);
         osc.stop(now + 0.09);
+      }
+      else if (type === "iron_hit") {
+        // 무쇠공 관통 파괴음 (묵직하고 시원한 타격감)
+        osc.type = "sawtooth";
+        osc.frequency.setValueAtTime(220, now);
+        osc.frequency.exponentialRampToValueAtTime(80, now + 0.12);
+        gain.gain.setValueAtTime(0.3, now);
+        gain.gain.linearRampToValueAtTime(0.01, now + 0.12);
+        osc.start(now);
+        osc.stop(now + 0.12);
       }
       else if (type === "hard_hit") {
         osc.type = "square";
@@ -482,12 +490,17 @@
     nameInput.value = myName;
 
     let activeBricks = [];
-    let ball = { x: 250, y: 350, radius: 8 };
+    let balls = [];
+    let ballTrails = []; // 무쇠공 잔상 궤적 저장
     let orbData = null;
     let paddles = { bottom: 250, left: 250, right: 250 };
     let playerNames = { bottom: "BOT", left: "BOT", right: "BOT" };
     let botSlots = ["bottom", "left", "right"];
-    let magnetRemain = { bottom: 0, left: 0, right: 0 };
+    let powerupStatus = {
+      bottom: { type: null, remain: 0 },
+      left: { type: null, remain: 0 },
+      right: { type: null, remain: 0 }
+    };
     let ballStuckTo = null;
 
     let lastTouchX = null;
@@ -568,10 +581,10 @@
           stageBadge.style.display = "block";
         } 
         else if (msg.type === "game_update") {
-          ball = msg.ball;
+          balls = msg.balls || [];
           orbData = msg.orb;
           ballStuckTo = msg.ball_stuck_to;
-          magnetRemain = msg.magnet_remain || magnetRemain;
+          powerupStatus = msg.powerup_status || powerupStatus;
 
           for (let r of ["bottom", "left", "right"]) {
             if (r !== myRole) {
@@ -726,16 +739,17 @@
       lastTouchY = null;
     });
 
-    function drawCurvedPaddle(x, y, w, h, color, labelText, remainTime) {
+    function drawCurvedPaddle(x, y, w, h, color, labelText, powerup) {
       ctx.save();
       ctx.fillStyle = color;
       ctx.beginPath();
       const r = Math.min(w, h) / 2;
       ctx.roundRect(x, y, w, h, r);
 
-      if (remainTime > 0) {
-        ctx.shadowColor = "#ffcc00";
-        ctx.shadowBlur = 15;
+      // 기능별 네온 글로우
+      if (powerup && powerup.type) {
+        ctx.shadowColor = color;
+        ctx.shadowBlur = 18;
       }
       ctx.fill();
       ctx.closePath();
@@ -745,8 +759,11 @@
       ctx.font = "bold 10px sans-serif";
 
       let displayStr = labelText;
-      if (remainTime > 0) {
-        displayStr += ` ⚡[${Math.ceil(remainTime)}s]`;
+      if (powerup && powerup.type && powerup.remain > 0) {
+        const sec = Math.ceil(powerup.remain);
+        if (powerup.type === "CATCH") displayStr += ` 🧲[${sec}s]`;
+        else if (powerup.type === "MULTI") displayStr += ` 🔮[${sec}s]`;
+        else if (powerup.type === "IRON") displayStr += ` 💣[${sec}s]`;
       }
 
       if (w > h) {
@@ -764,7 +781,7 @@
       ctx.fillStyle = "#333";
       ctx.fillRect(0, 0, canvas.width, 10);
 
-      // 서클 레일 및 소형화된 마법구슬
+      // 마법구슬 서클 레일
       if (orbData) {
         ctx.save();
         ctx.beginPath();
@@ -775,7 +792,6 @@
         ctx.stroke();
         ctx.closePath();
 
-        // 9px 소형 마법구슬
         const orbR = orbData.radius || 9;
         ctx.beginPath();
         ctx.arc(orbData.x, orbData.y, orbR, 0, Math.PI * 2);
@@ -794,7 +810,7 @@
         ctx.restore();
       }
 
-      // 살아있는 블록 렌더링
+      // 블록 렌더링
       activeBricks.forEach(b => {
         ctx.save();
         if (b.hardened) {
@@ -827,8 +843,14 @@
         ctx.restore();
       });
 
+      // 패들 컬러 결정 (기능별 고유 컬러)
       const getPaddleColor = (role, isBot) => {
-        if (magnetRemain[role] > 0) return "#ffd700";
+        const p = powerupStatus[role];
+        if (p && p.type && p.remain > 0) {
+          if (p.type === "CATCH") return "#ffd700";  // 1번: 골드
+          if (p.type === "MULTI") return "#00ffcc";  // 2번: 네온 시안
+          if (p.type === "IRON") return "#a855f7";   // 3번: 일렉트릭 퍼플
+        }
         if (isBot) return "#555";
         if (role === "bottom") return "#00ffcc";
         if (role === "left") return "#ff007f";
@@ -836,22 +858,75 @@
       };
 
       const isBotBottom = botSlots.includes("bottom");
-      drawCurvedPaddle(paddles.bottom - 35, canvas.height - 20, 70, 10, getPaddleColor("bottom", isBotBottom), playerNames.bottom, magnetRemain.bottom);
+      drawCurvedPaddle(paddles.bottom - 35, canvas.height - 20, 70, 10, getPaddleColor("bottom", isBotBottom), playerNames.bottom, powerupStatus.bottom);
 
       const isBotLeft = botSlots.includes("left");
-      drawCurvedPaddle(10, paddles.left - 35, 10, 70, getPaddleColor("left", isBotLeft), playerNames.left, magnetRemain.left);
+      drawCurvedPaddle(10, paddles.left - 35, 10, 70, getPaddleColor("left", isBotLeft), playerNames.left, powerupStatus.left);
 
       const isBotRight = botSlots.includes("right");
-      drawCurvedPaddle(canvas.width - 20, paddles.right - 35, 10, 70, getPaddleColor("right", isBotRight), playerNames.right, magnetRemain.right);
+      drawCurvedPaddle(canvas.width - 20, paddles.right - 35, 10, 70, getPaddleColor("right", isBotRight), playerNames.right, powerupStatus.right);
 
-      ctx.beginPath();
-      ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
-      ctx.fillStyle = ballStuckTo ? "#ffea00" : ((orbData && orbData.holding) ? "#ffff55" : "#fff");
-      ctx.shadowColor = ballStuckTo ? "#ffaa00" : "#00d2ff";
-      ctx.shadowBlur = ballStuckTo ? 18 : 10;
-      ctx.fill();
-      ctx.shadowBlur = 0;
-      ctx.closePath();
+      // [무쇠공 잔상(Trail) 및 공 렌더링]
+      balls.forEach((ball, idx) => {
+        if (ball.is_iron) {
+          // 잔상 좌표 기록
+          ballTrails.push({ x: ball.x, y: ball.y, alpha: 0.65 });
+        }
+      });
+
+      // 잔상 서서히 페이드아웃 및 렌더링
+      for (let i = ballTrails.length - 1; i >= 0; i--) {
+        const t = ballTrails[i];
+        ctx.beginPath();
+        ctx.arc(t.x, t.y, 7, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(168, 85, 247, ${t.alpha * 0.4})`;
+        ctx.shadowColor = "#a855f7";
+        ctx.shadowBlur = 10;
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.closePath();
+        t.alpha -= 0.08;
+        if (t.alpha <= 0) {
+          ballTrails.splice(i, 1);
+        }
+      }
+
+      // 공 본체 렌더링
+      balls.forEach((ball, idx) => {
+        ctx.beginPath();
+        ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
+
+        if (ball.is_iron) {
+          // 3번: 시커멓고 반짝이는 무쇠공
+          const ironGrad = ctx.createRadialGradient(ball.x - 3, ball.y - 3, 1, ball.x, ball.y, ball.radius);
+          ironGrad.addColorStop(0, "#ffffff");
+          ironGrad.addColorStop(0.25, "#888888");
+          ironGrad.addColorStop(0.75, "#18181b");
+          ironGrad.addColorStop(1, "#050505");
+          ctx.fillStyle = ironGrad;
+          ctx.shadowColor = "#c084fc";
+          ctx.shadowBlur = 14;
+        } else if (ballStuckTo && idx === 0) {
+          // 자석 대기 중
+          ctx.fillStyle = "#ffea00";
+          ctx.shadowColor = "#ffaa00";
+          ctx.shadowBlur = 18;
+        } else if (orbData && orbData.holding && idx === 0) {
+          // 구슬에 삼켜진 상태
+          ctx.fillStyle = "#ffff55";
+          ctx.shadowColor = "#ffea00";
+          ctx.shadowBlur = 12;
+        } else {
+          // 일반 공 / 멀티볼
+          ctx.fillStyle = "#fff";
+          ctx.shadowColor = "#00d2ff";
+          ctx.shadowBlur = 10;
+        }
+
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.closePath();
+      });
     }
   </script>
 </body>
