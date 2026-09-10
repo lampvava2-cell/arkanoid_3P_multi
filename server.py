@@ -4,14 +4,16 @@ import math
 import random
 import websockets
 
-# 공평한 정사각형 해상도 좌표계 (500 x 500)
+# 완벽한 1:1 대칭 정사각 좌표계 (500 x 500)
 WIDTH = 500
 HEIGHT = 500
 
-VERSION_TITLE = "정사각형_상대터치버전5 (Square & Relative Touch)"
+VERSION_TITLE = "완전정사각_대기실버전6 (True Square & Waiting Room)"
 
-SLOTS = {"bottom": "BOT", "left": "BOT", "right": "BOT"}
-CONNECTED_CLIENTS = {}
+# 슬롯 관리: "bottom", "left", "right"
+SLOTS = {"bottom": None, "left": None, "right": None}  # ws or None(BOT)
+PLAYER_NAMES = {"bottom": "BOT", "left": "BOT", "right": "BOT"}
+CONNECTED_CLIENTS = {}  # ws: {"role": None, "name": "익명", "state": "lobby"|"playing"|"waiting"}
 
 game_started = False
 current_stage = 1
@@ -37,8 +39,9 @@ bricks = []
 def generate_stage(stage_num):
     new_bricks = []
     brick_id = 0
+    center_x, center_y = WIDTH / 2, HEIGHT / 2 - 20
     if stage_num == 1:
-        # 스테이지 1: 정사각형 중앙 6x6 정방형 집중 배치
+        # 스테이지 1: 6x6 정사각 중앙 블록
         rows, cols = 6, 6
         start_x = (WIDTH - (cols * 36)) / 2 + 3
         start_y = (HEIGHT - (rows * 22)) / 2 - 20
@@ -47,16 +50,14 @@ def generate_stage(stage_num):
                 new_bricks.append({"id": brick_id, "x": start_x + c * 36, "y": start_y + r * 22, "w": 30, "h": 14, "alive": True})
                 brick_id += 1
     elif stage_num == 2:
-        # 스테이지 2: 십자형 대칭 클러스터
-        center_x, center_y = WIDTH / 2, HEIGHT / 2 - 20
+        # 스테이지 2: 십자형 정방 대칭
         for r in range(7):
             for c in range(7):
                 if r == 3 or c == 3 or (abs(r - 3) + abs(c - 3) <= 2):
                     new_bricks.append({"id": brick_id, "x": center_x - 126 + c * 36, "y": center_y - 77 + r * 22, "w": 30, "h": 14, "alive": True})
                     brick_id += 1
     else:
-        # 스테이지 3: 8x8 외곽 요새 다이아몬드
-        center_x, center_y = WIDTH / 2, HEIGHT / 2 - 20
+        # 스테이지 3: 8x8 다이아몬드 요새
         for r in range(8):
             for c in range(8):
                 if r in [0, 7] or c in [0, 7] or (r in [3, 4] and c in [3, 4]):
@@ -76,19 +77,19 @@ bricks = generate_stage(current_stage)
 
 def update_ai():
     ai_speed = 6.0
-    if SLOTS["bottom"] == "BOT":
+    if SLOTS["bottom"] is None:
         tx = ball["x"]
         cx = paddle_positions["bottom"]
         paddle_positions["bottom"] += max(-ai_speed, min(ai_speed, tx - cx))
         paddle_positions["bottom"] = max(40, min(WIDTH - 40, paddle_positions["bottom"]))
 
-    if SLOTS["left"] == "BOT":
+    if SLOTS["left"] is None:
         ty = ball["y"]
         cy = paddle_positions["left"]
         paddle_positions["left"] += max(-ai_speed, min(ai_speed, ty - cy))
         paddle_positions["left"] = max(40, min(HEIGHT - 40, paddle_positions["left"]))
 
-    if SLOTS["right"] == "BOT":
+    if SLOTS["right"] is None:
         ty = ball["y"]
         cy = paddle_positions["right"]
         paddle_positions["right"] += max(-ai_speed, min(ai_speed, ty - cy))
@@ -96,13 +97,21 @@ def update_ai():
 
 async def broadcast_lobby():
     slots_info = {}
-    for role, occ in SLOTS.items():
-        slots_info[role] = "BOT" if occ == "BOT" else "USER"
+    for role in ["bottom", "left", "right"]:
+        ws = SLOTS[role]
+        if ws is None:
+            slots_info[role] = {"type": "BOT", "name": "BOT"}
+        else:
+            slots_info[role] = {"type": "USER", "name": PLAYER_NAMES[role]}
+
+    waiting_users = [info["name"] for ws, info in CONNECTED_CLIENTS.items() if info["state"] == "waiting"]
+
     payload = json.dumps({
         "type": "lobby_state",
         "title": VERSION_TITLE,
         "slots": slots_info,
         "game_started": game_started,
+        "waiting_users": waiting_users,
         "stage": current_stage
     })
     for ws in list(CONNECTED_CLIENTS.keys()):
@@ -111,7 +120,7 @@ async def broadcast_lobby():
         except:
             pass
 
-def enforce_speed_and_angle(vx, vy):
+def enforce_speed(vx, vy):
     current_speed = math.hypot(vx, vy)
     if current_speed == 0:
         return BALL_BASE_SPEED, -BALL_BASE_SPEED
@@ -120,7 +129,7 @@ def enforce_speed_and_angle(vx, vy):
 
 async def game_loop():
     global game_started, current_stage, bricks, ball
-    P_LEN = 70  # 정사각형에 맞춘 패들 균등 길이
+    P_LEN = 70
 
     while True:
         if game_started:
@@ -134,13 +143,13 @@ async def game_loop():
                 ball["x"] += step_vx
                 ball["y"] += step_vy
 
-                # 1. 상단 천장 반사
+                # 상단 천장
                 if ball["y"] - ball["radius"] <= 10:
                     ball["y"] = 10 + ball["radius"]
                     ball["vy"] = abs(ball["vy"])
                     step_vy = abs(step_vy)
 
-                # 2. 하단 패들 충돌
+                # 하단 패들
                 if ball["y"] + ball["radius"] >= HEIGHT - 22:
                     pad_x = paddle_positions["bottom"]
                     if pad_x - P_LEN / 2 <= ball["x"] <= pad_x + P_LEN / 2:
@@ -154,47 +163,43 @@ async def game_loop():
                         reset_ball()
                         break
 
-                # 3. 좌측 패들 충돌 (상향 바이어스)
+                # 좌측 패들
                 if ball["x"] - ball["radius"] <= 22:
                     pad_y = paddle_positions["left"]
                     if pad_y - P_LEN / 2 <= ball["y"] <= pad_y + P_LEN / 2:
                         offset = (ball["y"] - pad_y) / (P_LEN / 2)
-                        adjusted_offset = max(-1.0, min(1.0, offset - 0.25))
-                        rebound_angle = adjusted_offset * (math.pi / 3.2)
-                        
+                        adj_offset = max(-1.0, min(1.0, offset - 0.25))
+                        rebound_angle = adj_offset * (math.pi / 3.2)
                         ball["vx"] = BALL_BASE_SPEED * math.cos(rebound_angle)
                         ball["vy"] = BALL_BASE_SPEED * math.sin(rebound_angle)
-                        
                         if abs(ball["vy"]) < 2.5:
                             ball["vy"] = -2.8 if offset <= 0 else 2.8
-                        ball["vx"], ball["vy"] = enforce_speed_and_angle(ball["vx"], ball["vy"])
+                        ball["vx"], ball["vy"] = enforce_speed(ball["vx"], ball["vy"])
                         step_vx = ball["vx"] / sub_steps
                         step_vy = ball["vy"] / sub_steps
                     elif ball["x"] < -30:
                         reset_ball()
                         break
 
-                # 4. 우측 패들 충돌 (상향 바이어스)
+                # 우측 패들
                 if ball["x"] + ball["radius"] >= WIDTH - 22:
                     pad_y = paddle_positions["right"]
                     if pad_y - P_LEN / 2 <= ball["y"] <= pad_y + P_LEN / 2:
                         offset = (ball["y"] - pad_y) / (P_LEN / 2)
-                        adjusted_offset = max(-1.0, min(1.0, offset - 0.25))
-                        rebound_angle = adjusted_offset * (math.pi / 3.2)
-                        
+                        adj_offset = max(-1.0, min(1.0, offset - 0.25))
+                        rebound_angle = adj_offset * (math.pi / 3.2)
                         ball["vx"] = -BALL_BASE_SPEED * math.cos(rebound_angle)
                         ball["vy"] = BALL_BASE_SPEED * math.sin(rebound_angle)
-                        
                         if abs(ball["vy"]) < 2.5:
                             ball["vy"] = -2.8 if offset <= 0 else 2.8
-                        ball["vx"], ball["vy"] = enforce_speed_and_angle(ball["vx"], ball["vy"])
+                        ball["vx"], ball["vy"] = enforce_speed(ball["vx"], ball["vy"])
                         step_vx = ball["vx"] / sub_steps
                         step_vy = ball["vy"] / sub_steps
                     elif ball["x"] > WIDTH + 30:
                         reset_ball()
                         break
 
-                # 5. 벽돌 충돌 판정
+                # 벽돌 충돌
                 r = ball["radius"]
                 for b in bricks:
                     if b["alive"]:
@@ -211,20 +216,24 @@ async def game_loop():
                                 step_vy = -step_vy
                             break
 
-            # 스테이지 완료
+            # 스테이지 클리어
             if sum(1 for b in bricks if b["alive"]) == 0:
                 current_stage = (current_stage % TOTAL_STAGES) + 1
                 bricks = generate_stage(current_stage)
                 reset_ball()
 
-            # 브로드캐스트
-            bot_list = [role for role, occ in SLOTS.items() if occ == "BOT"]
+            # 인게임 상태 브로드캐스트
+            bot_list = [role for role, ws in SLOTS.items() if ws is None]
+            waiting_users = [info["name"] for ws, info in CONNECTED_CLIENTS.items() if info["state"] == "waiting"]
+            
             payload = json.dumps({
                 "type": "game_update",
                 "ball": ball,
                 "paddles": paddle_positions,
+                "names": PLAYER_NAMES,
                 "bot_slots": bot_list,
                 "stage": current_stage,
+                "waiting_users": waiting_users,
                 "bricks": [b["id"] for b in bricks if not b["alive"]]
             })
             for ws in list(CONNECTED_CLIENTS.keys()):
@@ -236,7 +245,17 @@ async def game_loop():
         await asyncio.sleep(0.016)
 
 async def handler(websocket):
-    CONNECTED_CLIENTS[websocket] = {"role": None}
+    # 신규 접속 처리: 게임 진행 중이면 대기실 상태로 등록
+    state = "waiting" if game_started else "lobby"
+    CONNECTED_CLIENTS[websocket] = {"role": None, "name": f"게스트{random.randint(100, 999)}", "state": state}
+    
+    # 늦게 온 접속자에게 현재 게임 상태 즉시 동기화
+    if game_started:
+        await websocket.send(json.dumps({
+            "type": "waiting_room_notice",
+            "bricks": bricks,
+            "stage": current_stage
+        }))
     await broadcast_lobby()
 
     try:
@@ -244,13 +263,26 @@ async def handler(websocket):
             data = json.loads(message)
             msg_type = data.get("type")
 
-            if msg_type == "select_role":
+            if msg_type == "set_name":
+                CONNECTED_CLIENTS[websocket]["name"] = str(data.get("name", "익명"))[:10]
+                role = CONNECTED_CLIENTS[websocket]["role"]
+                if role:
+                    PLAYER_NAMES[role] = CONNECTED_CLIENTS[websocket]["name"]
+                await broadcast_lobby()
+
+            elif msg_type == "select_role":
+                if game_started:
+                    continue  # 진행 중엔 로비 슬롯 변경 불가
                 role = data.get("role")
-                for r, occ in SLOTS.items():
-                    if occ == websocket:
-                        SLOTS[r] = "BOT"
-                if role in SLOTS and (SLOTS[role] == "BOT" or SLOTS[role] == websocket):
+                # 이전 슬롯 비우기
+                for r in ["bottom", "left", "right"]:
+                    if SLOTS[r] == websocket:
+                        SLOTS[r] = None
+                        PLAYER_NAMES[r] = "BOT"
+                # 새 슬롯 배정
+                if role in SLOTS and (SLOTS[role] is None or SLOTS[role] == websocket):
                     SLOTS[role] = websocket
+                    PLAYER_NAMES[role] = CONNECTED_CLIENTS[websocket]["name"]
                     CONNECTED_CLIENTS[websocket]["role"] = role
                 await broadcast_lobby()
 
@@ -260,6 +292,9 @@ async def handler(websocket):
                 bricks = generate_stage(current_stage)
                 reset_ball()
                 game_started = True
+                for ws in CONNECTED_CLIENTS:
+                    CONNECTED_CLIENTS[ws]["state"] = "playing" if CONNECTED_CLIENTS[ws]["role"] else "waiting"
+
                 init_payload = json.dumps({
                     "type": "game_start",
                     "stage": current_stage,
@@ -267,26 +302,32 @@ async def handler(websocket):
                 })
                 for ws in list(CONNECTED_CLIENTS.keys()):
                     await ws.send(init_payload)
+                await broadcast_lobby()
 
             elif msg_type == "move":
                 role = CONNECTED_CLIENTS[websocket]["role"]
                 if role and game_started:
-                    # 정사각형 범위 내로 제한
                     max_limit = WIDTH - 35 if role == "bottom" else HEIGHT - 35
                     paddle_positions[role] = max(35, min(max_limit, data["pos"]))
 
     except websockets.ConnectionClosed:
         pass
     finally:
-        for r, occ in SLOTS.items():
-            if occ == websocket:
-                SLOTS[r] = "BOT"
+        for r in ["bottom", "left", "right"]:
+            if SLOTS[r] == websocket:
+                SLOTS[r] = None
+                PLAYER_NAMES[r] = "BOT"
         CONNECTED_CLIENTS.pop(websocket, None)
+        
+        # 만약 플레이어가 아무도 없으면 게임 자동 리셋
+        active_users = [ws for ws, info in CONNECTED_CLIENTS.items() if info["role"]]
+        if len(active_users) == 0:
+            game_started = False
         await broadcast_lobby()
 
 async def main():
     server = await websockets.serve(handler, "0.0.0.0", 8765)
-    print(f"[{VERSION_TITLE}] 서버 가동 중 (500x500)...")
+    print(f"[{VERSION_TITLE}] 서버 가동 시작...")
     await asyncio.gather(server.wait_closed(), game_loop())
 
 if __name__ == "__main__":
