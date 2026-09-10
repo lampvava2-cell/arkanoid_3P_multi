@@ -8,7 +8,7 @@ import websockets
 WIDTH = 500
 HEIGHT = 500
 
-VERSION_TITLE = "무수직반사_스코어버전8 (Angle Forced & Score System)"
+VERSION_TITLE = "무수직반사스코어버전8 (Angle Forced & Score System)"
 
 SLOTS = {"bottom": None, "left": None, "right": None}
 PLAYER_NAMES = {"bottom": "BOT", "left": "BOT", "right": "BOT"}
