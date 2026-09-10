@@ -8,7 +8,7 @@ import websockets
 WIDTH = 500
 HEIGHT = 500
 
-VERSION_TITLE = "완전정사각_대기실버전6 (True Square & Waiting Room)"
+VERSION_TITLE = "완전정사각대기실버전6(TrueSquare& Waiting Room)"
 
 # 슬롯 관리: "bottom", "left", "right"
 SLOTS = {"bottom": None, "left": None, "right": None}  # ws or None(BOT)
