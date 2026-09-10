@@ -10,7 +10,7 @@ import websockets
 WIDTH = 500
 HEIGHT = 500
 
-VERSION_TITLE = "정통알카노이드_각도복원_스코어버전12 (Classic Paddle Angle & 10% Slower)"
+VERSION_TITLE = "정통알카노이드_랜덤타점봇_버전13 (Dynamic Contact BOT)"
 
 SLOTS = {"bottom": None, "left": None, "right": None}
 PLAYER_NAMES = {"bottom": "BOT", "left": "BOT", "right": "BOT"}
@@ -29,7 +29,13 @@ paddle_positions = {
     "right": HEIGHT / 2
 }
 
-# [공 속도 10% 감속: 6.8 -> 6.12]
+# [핵심] 봇이 공을 받을 때 패들의 어느 부위로 칠지 결정하는 랜덤 오프셋 (-24 ~ +24)
+ai_offsets = {
+    "bottom": 0.0,
+    "left": 0.0,
+    "right": 0.0
+}
+
 BALL_BASE_SPEED = 6.12
 ball = {
     "x": WIDTH / 2,
@@ -78,34 +84,40 @@ def generate_stage(stage_num):
     return new_bricks
 
 def reset_ball():
-    global ball, last_hitter
+    global ball, last_hitter, ai_offsets
     ball["x"] = WIDTH / 2
     ball["y"] = HEIGHT / 2 + 80
     angle = random.choice([-1, 1]) * random.uniform(0.35, 0.75)
     ball["vx"] = BALL_BASE_SPEED * math.sin(angle)
     ball["vy"] = -abs(BALL_BASE_SPEED * math.cos(angle))
     last_hitter = None
+    ai_offsets = {r: random.uniform(-24, 24) for r in ai_offsets}
 
 bricks = generate_stage(current_stage)
 
 def update_ai():
-    ai_speed = 5.6  # 공 속도 감속에 맞춰 AI 추적 속도도 부드럽게 조정
+    """패들의 중앙이 아니라 무작위 타격 지점(ai_offsets)을 목표로 이동"""
+    ai_speed = 5.6
+    
+    # 하단 봇 (공이 아래로 내려올 때 패들 목표점 = 공 위치 + 랜덤 오프셋)
     if SLOTS["bottom"] is None:
-        tx = ball["x"]
+        target_x = ball["x"] + ai_offsets["bottom"]
         cx = paddle_positions["bottom"]
-        paddle_positions["bottom"] += max(-ai_speed, min(ai_speed, tx - cx))
+        paddle_positions["bottom"] += max(-ai_speed, min(ai_speed, target_x - cx))
         paddle_positions["bottom"] = max(40, min(WIDTH - 40, paddle_positions["bottom"]))
 
+    # 좌측 봇
     if SLOTS["left"] is None:
-        ty = ball["y"]
+        target_y = ball["y"] + ai_offsets["left"]
         cy = paddle_positions["left"]
-        paddle_positions["left"] += max(-ai_speed, min(ai_speed, ty - cy))
+        paddle_positions["left"] += max(-ai_speed, min(ai_speed, target_y - cy))
         paddle_positions["left"] = max(40, min(HEIGHT - 40, paddle_positions["left"]))
 
+    # 우측 봇
     if SLOTS["right"] is None:
-        ty = ball["y"]
+        target_y = ball["y"] + ai_offsets["right"]
         cy = paddle_positions["right"]
-        paddle_positions["right"] += max(-ai_speed, min(ai_speed, ty - cy))
+        paddle_positions["right"] += max(-ai_speed, min(ai_speed, target_y - cy))
         paddle_positions["right"] = max(40, min(HEIGHT - 40, paddle_positions["right"]))
 
 async def broadcast_lobby():
@@ -132,7 +144,7 @@ async def broadcast_lobby():
             pass
 
 async def game_loop():
-    global game_started, current_stage, bricks, ball, last_hitter, pause_until, orb
+    global game_started, current_stage, bricks, ball, last_hitter, pause_until, orb, ai_offsets
     P_LEN = 70
 
     while True:
@@ -156,7 +168,7 @@ async def game_loop():
                     ball["x"] += step_vx
                     ball["y"] += step_vy
 
-                    # 마법구슬 충돌: 서클 중심 내부로 랜덤 토스
+                    # 마법구슬 충돌
                     d_orb = math.hypot(ball["x"] - orb_x, ball["y"] - orb_y)
                     if d_orb <= (ball["radius"] + orb["radius"]):
                         center_dir = math.atan2(orb["cy"] - orb_y, orb["cx"] - orb_x)
@@ -172,23 +184,24 @@ async def game_loop():
                         step_vx = ball["vx"] / sub_steps
                         step_vy = ball["vy"] / sub_steps
                         sound_event = "orb"
+                        # 마법구슬 맞았을 때도 봇들의 타점 새로 섞기
+                        ai_offsets = {r: random.uniform(-24, 24) for r in ai_offsets}
                         break
 
-                    # 1. 상단 천장 반사
+                    # 1. 천장
                     if ball["y"] - ball["radius"] <= 10:
                         ball["y"] = 10 + ball["radius"]
                         ball["vy"] = abs(ball["vy"])
                         step_vy = ball["vy"] / sub_steps
                         sound_event = "wall"
 
-                    # 2. 하단 패들: [알카노이드 정석 반사각]
-                    # 중앙 피격 시 수직 90도 (rebound_angle = 0), 끝으로 갈수록 최대 60도 (π/3)
+                    # 2. 하단 패들
                     if ball["y"] + ball["radius"] >= HEIGHT - 22:
                         pad_x = paddle_positions["bottom"]
                         if pad_x - P_LEN / 2 <= ball["x"] <= pad_x + P_LEN / 2:
                             ball["y"] = HEIGHT - 22 - ball["radius"]
-                            offset = (ball["x"] - pad_x) / (P_LEN / 2)  # -1.0 ~ +1.0
-                            rebound_angle = offset * (math.pi / 3.0)    # 최대 ±60도
+                            offset = (ball["x"] - pad_x) / (P_LEN / 2)
+                            rebound_angle = offset * (math.pi / 3.0)
                             
                             ball["vx"] = BALL_BASE_SPEED * math.sin(rebound_angle)
                             ball["vy"] = -BALL_BASE_SPEED * math.cos(rebound_angle)
@@ -196,14 +209,15 @@ async def game_loop():
                             step_vy = ball["vy"] / sub_steps
                             last_hitter = "bottom"
                             sound_event = "paddle"
+                            # 칠 때마다 다음 공을 위한 랜덤 타점 재추첨
+                            ai_offsets["bottom"] = random.uniform(-24, 24)
                         elif ball["y"] > HEIGHT + 30:
                             SCORES["bottom"] = max(0, SCORES["bottom"] - 200)
                             sound_event = "lose"
                             reset_ball()
                             break
 
-                    # 3. 좌측 패들: [알카노이드 정석 반사각]
-                    # 중앙 피격 시 수평 (rebound_angle = 0), 끝으로 갈수록 최대 ±60도
+                    # 3. 좌측 패들
                     if ball["x"] - ball["radius"] <= 22:
                         pad_y = paddle_positions["left"]
                         if pad_y - P_LEN / 2 <= ball["y"] <= pad_y + P_LEN / 2:
@@ -217,13 +231,14 @@ async def game_loop():
                             step_vy = ball["vy"] / sub_steps
                             last_hitter = "left"
                             sound_event = "paddle"
+                            ai_offsets["left"] = random.uniform(-24, 24)
                         elif ball["x"] < -30:
                             SCORES["left"] = max(0, SCORES["left"] - 200)
                             sound_event = "lose"
                             reset_ball()
                             break
 
-                    # 4. 우측 패들: [알카노이드 정석 반사각]
+                    # 4. 우측 패들
                     if ball["x"] + ball["radius"] >= WIDTH - 22:
                         pad_y = paddle_positions["right"]
                         if pad_y - P_LEN / 2 <= ball["y"] <= pad_y + P_LEN / 2:
@@ -237,13 +252,14 @@ async def game_loop():
                             step_vy = ball["vy"] / sub_steps
                             last_hitter = "right"
                             sound_event = "paddle"
+                            ai_offsets["right"] = random.uniform(-24, 24)
                         elif ball["x"] > WIDTH + 30:
                             SCORES["right"] = max(0, SCORES["right"] - 200)
                             sound_event = "lose"
                             reset_ball()
                             break
 
-                    # 5. 벽돌 충돌 판정
+                    # 5. 벽돌 충돌
                     r = ball["radius"]
                     for b in bricks:
                         if not b["alive"]:
