@@ -260,7 +260,7 @@
   </style>
 </head>
 <body>
-  <div id="versionTitle">정통알카노이드 (Block Regeneration 20%)</div>
+  <div id="versionTitle">정통알카노이드 (특수아이템 자석 패들)</div>
   <div id="netStatus">🟡 Railway 서버 신호 연결 중...</div>
 
   <div id="scoreboard">
@@ -365,9 +365,29 @@
         gain.gain.linearRampToValueAtTime(0.01, now + 0.09);
         osc.start(now);
         osc.stop(now + 0.09);
-      } 
+      }
+      else if (type === "hard_hit") {
+        // 강화 블록 1회 타격 시 묵직한 메탈릭 타격음
+        osc.type = "square";
+        osc.frequency.setValueAtTime(450, now);
+        osc.frequency.exponentialRampToValueAtTime(300, now + 0.07);
+        gain.gain.setValueAtTime(0.2, now);
+        gain.gain.linearRampToValueAtTime(0.01, now + 0.07);
+        osc.start(now);
+        osc.stop(now + 0.07);
+      }
+      else if (type === "powerup") {
+        // 15초 특수 아이템 획득 축하음 (3단 아르페지오 신스)
+        osc.type = "triangle";
+        osc.frequency.setValueAtTime(523, now);
+        osc.frequency.setValueAtTime(659, now + 0.08);
+        osc.frequency.setValueAtTime(784, now + 0.16);
+        gain.gain.setValueAtTime(0.28, now);
+        gain.gain.linearRampToValueAtTime(0.01, now + 0.28);
+        osc.start(now);
+        osc.stop(now + 0.28);
+      }
       else if (type === "restore") {
-        // 블록 20% 복원 특수 효과음 (신비로운 상승 아르페지오 톤)
         osc.type = "sine";
         osc.frequency.setValueAtTime(330, now);
         osc.frequency.exponentialRampToValueAtTime(880, now + 0.2);
@@ -444,15 +464,18 @@
     nameInput.value = myName;
 
     let bricks = [];
-    let aliveBrickIds = new Set();
+    let activeBricksMap = new Map(); // id -> {hp, hardened}
     let ball = { x: 250, y: 350, radius: 8 };
     let orbData = null;
     let paddles = { bottom: 250, left: 250, right: 250 };
     let playerNames = { bottom: "BOT", left: "BOT", right: "BOT" };
     let botSlots = ["bottom", "left", "right"];
+    let magnetRemain = { bottom: 0, left: 0, right: 0 };
+    let ballStuckTo = null;
 
     let lastTouchX = null;
     let lastTouchY = null;
+    let touchMoved = false;
 
     function updateScoreboard(scores, names) {
       scoreBottom.innerText = `${names.bottom}: ${scores.bottom}`;
@@ -508,7 +531,6 @@
           stageBadge.style.display = "block";
           stageBadge.innerText = `STAGE ${msg.stage} / 3 (관전 중)`;
           bricks = msg.bricks;
-          aliveBrickIds = new Set(bricks.filter(b => b.alive).map(b => b.id));
         } 
         else if (msg.type === "game_start") {
           if (msg.assigned_role) {
@@ -518,11 +540,13 @@
           waitingOverlay.style.display = "none";
           stageBadge.style.display = "block";
           bricks = msg.bricks;
-          aliveBrickIds = new Set(bricks.filter(b => b.alive).map(b => b.id));
         } 
         else if (msg.type === "game_update") {
           ball = msg.ball;
           orbData = msg.orb;
+          ballStuckTo = msg.ball_stuck_to;
+          magnetRemain = msg.magnet_remain || magnetRemain;
+
           for (let r of ["bottom", "left", "right"]) {
             if (r !== myRole) {
               paddles[r] = msg.paddles[r];
@@ -532,8 +556,9 @@
           botSlots = msg.bot_slots || [];
           stageBadge.innerText = `STAGE ${msg.stage} / 3`;
 
-          if (msg.alive_brick_ids) {
-            aliveBrickIds = new Set(msg.alive_brick_ids);
+          if (msg.bricks_data) {
+            activeBricksMap.clear();
+            msg.bricks_data.forEach(b => activeBricksMap.set(b.id, b));
           }
 
           if (msg.scores) updateScoreboard(msg.scores, playerNames);
@@ -542,7 +567,7 @@
             chargeContainer.style.display = "block";
             const pct = Math.round(orbData.progress * 100);
             chargeBar.style.width = `${pct}%`;
-            chargeText.innerText = `ORB CHARGING ${pct}% (블록 20% 복원!)`;
+            chargeText.innerText = `ORB CHARGING ${pct}% (강화 블록 20% 복원!)`;
           } else {
             chargeContainer.style.display = "none";
             chargeBar.style.width = "0%";
@@ -630,15 +655,23 @@
       });
     }
 
+    // 터치 시 공 발사 및 패들 드래그
     canvas.addEventListener("touchstart", (e) => {
       initAudio();
+      touchMoved = false;
       const touch = e.touches[0];
       lastTouchX = touch.clientX;
       lastTouchY = touch.clientY;
+
+      // 공이 내 패들에 붙어있을 때 터치하면 즉시 발사
+      if (ballStuckTo === myRole && ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "release_ball" }));
+      }
     }, { passive: false });
 
     canvas.addEventListener("touchmove", (e) => {
       e.preventDefault();
+      touchMoved = true;
       if (!myRole || !ws || ws.readyState !== WebSocket.OPEN || lastTouchX === null) return;
 
       const touch = e.touches[0];
@@ -662,27 +695,45 @@
       }
     }, { passive: false });
 
-    canvas.addEventListener("touchend", () => {
+    canvas.addEventListener("touchend", (e) => {
+      // 탭(단순 터치)으로 발사할 수 있도록 touchend에서도 감지
+      if (!touchMoved && ballStuckTo === myRole && ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "release_ball" }));
+      }
       lastTouchX = null;
       lastTouchY = null;
     });
 
-    function drawCurvedPaddle(x, y, w, h, color, labelText) {
+    function drawCurvedPaddle(x, y, w, h, color, labelText, remainTime) {
+      ctx.save();
       ctx.fillStyle = color;
       ctx.beginPath();
       const r = Math.min(w, h) / 2;
       ctx.roundRect(x, y, w, h, r);
+
+      // 특수 자석 모드일 때 금빛 네온 아우라
+      if (remainTime > 0) {
+        ctx.shadowColor = "#ffcc00";
+        ctx.shadowBlur = 15;
+      }
       ctx.fill();
       ctx.closePath();
+      ctx.restore();
 
       ctx.fillStyle = "#fff";
-      ctx.font = "bold 11px sans-serif";
+      ctx.font = "bold 10px sans-serif";
+
+      let displayStr = labelText;
+      if (remainTime > 0) {
+        displayStr += ` ⚡[${Math.ceil(remainTime)}s]`;
+      }
+
       if (w > h) {
         ctx.textAlign = "center";
-        ctx.fillText(labelText, x + w / 2, y - 6);
+        ctx.fillText(displayStr, x + w / 2, y - 6);
       } else {
         ctx.textAlign = x < 50 ? "left" : "right";
-        ctx.fillText(labelText, x < 50 ? x + 16 : x - 6, y + h / 2 + 4);
+        ctx.fillText(displayStr, x < 50 ? x + 16 : x - 6, y + h / 2 + 4);
       }
     }
 
@@ -692,7 +743,7 @@
       ctx.fillStyle = "#333";
       ctx.fillRect(0, 0, canvas.width, 10);
 
-      // 서클 레일 및 마법구슬
+      // 마법구슬 서클 레일
       if (orbData) {
         ctx.save();
         ctx.beginPath();
@@ -720,32 +771,71 @@
         ctx.restore();
       }
 
-      // 벽돌 렌더링 (살아있는 ID 기준)
+      // [벽돌 렌더링: 일반 vs 2타 강화 블록]
       bricks.forEach(b => {
-        if (aliveBrickIds.has(b.id)) {
-          ctx.fillStyle = "#2c5282";
+        if (activeBricksMap.has(b.id)) {
+          const bData = activeBricksMap.get(b.id);
+
+          ctx.save();
+          if (bData.hardened) {
+            // 특수 2타 강화 블록: 황금/마젠타 그라데이션 및 네온 테두리
+            if (bData.hp === 2) {
+              ctx.fillStyle = "#e5a100";
+              ctx.strokeStyle = "#ffe855";
+              ctx.lineWidth = 1.5;
+              ctx.shadowColor = "#ffb700";
+              ctx.shadowBlur = 8;
+            } else {
+              // 1회 피격되어 HP 1 남았을 때 (균열/붉은 주황빛)
+              ctx.fillStyle = "#b84200";
+              ctx.strokeStyle = "#ff7733";
+              ctx.lineWidth = 1;
+            }
+          } else {
+            // 일반 블록 (블루 톤)
+            ctx.fillStyle = "#2c5282";
+            ctx.strokeStyle = "#4299e1";
+            ctx.lineWidth = 1;
+          }
+
           ctx.fillRect(b.x, b.y, b.w, b.h);
-          ctx.strokeStyle = "#4299e1";
           ctx.strokeRect(b.x, b.y, b.w, b.h);
+
+          // 2타 블록 중앙 엠블럼 표시
+          if (bData.hardened && bData.hp === 2) {
+            ctx.fillStyle = "#fff";
+            ctx.font = "bold 9px sans-serif";
+            ctx.textAlign = "center";
+            ctx.fillText("★", b.x + b.w / 2, b.y + b.h - 3);
+          }
+          ctx.restore();
         }
       });
 
-      // 패들
+      // [패들 렌더링: 특수 아이템 시 네온 골드로 변화]
+      const getPaddleColor = (role, isBot) => {
+        if (magnetRemain[role] > 0) return "#ffd700"; // 15초 특수 모드 황금색
+        if (isBot) return "#555";
+        if (role === "bottom") return "#00ffcc";
+        if (role === "left") return "#ff007f";
+        return "#ffaa00";
+      };
+
       const isBotBottom = botSlots.includes("bottom");
-      drawCurvedPaddle(paddles.bottom - 35, canvas.height - 20, 70, 10, isBotBottom ? "#555" : "#00ffcc", playerNames.bottom);
+      drawCurvedPaddle(paddles.bottom - 35, canvas.height - 20, 70, 10, getPaddleColor("bottom", isBotBottom), playerNames.bottom, magnetRemain.bottom);
 
       const isBotLeft = botSlots.includes("left");
-      drawCurvedPaddle(10, paddles.left - 35, 10, 70, isBotLeft ? "#555" : "#ff007f", playerNames.left);
+      drawCurvedPaddle(10, paddles.left - 35, 10, 70, getPaddleColor("left", isBotLeft), playerNames.left, magnetRemain.left);
 
       const isBotRight = botSlots.includes("right");
-      drawCurvedPaddle(canvas.width - 20, paddles.right - 35, 10, 70, isBotRight ? "#555" : "#ffaa00", playerNames.right);
+      drawCurvedPaddle(canvas.width - 20, paddles.right - 35, 10, 70, getPaddleColor("right", isBotRight), playerNames.right, magnetRemain.right);
 
-      // 공
+      // [공 렌더링]
       ctx.beginPath();
       ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
-      ctx.fillStyle = (orbData && orbData.holding) ? "#ffff55" : "#fff";
-      ctx.shadowColor = "#00d2ff";
-      ctx.shadowBlur = 10;
+      ctx.fillStyle = ballStuckTo ? "#ffea00" : ((orbData && orbData.holding) ? "#ffff55" : "#fff");
+      ctx.shadowColor = ballStuckTo ? "#ffaa00" : "#00d2ff";
+      ctx.shadowBlur = ballStuckTo ? 18 : 10;
       ctx.fill();
       ctx.shadowBlur = 0;
       ctx.closePath();
