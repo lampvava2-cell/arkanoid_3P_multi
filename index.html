@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>3인 멀티 알카노이드 (정밀 반사 & 스코어)</title>
+  <title>3인 멀티 알카노이드 (빵패들 & 사운드)</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -27,7 +27,6 @@
       margin-bottom: 6px;
       letter-spacing: 0.5px;
     }
-    /* 실시간 3인 스코어보드 바 */
     #scoreboard {
       display: flex;
       justify-content: space-around;
@@ -61,7 +60,6 @@
       50% { opacity: 1; transform: scale(1.02); }
     }
 
-    /* 1:1 완벽 정사각 캔버스 */
     #container {
       position: relative;
       width: min(92vw, 480px);
@@ -79,7 +77,7 @@
       display: block;
       aspect-ratio: 1 / 1;
     }
-    
+
     .overlay {
       position: absolute;
       top: 0; left: 0; width: 100%; height: 100%;
@@ -92,7 +90,7 @@
       padding: 16px;
     }
     h2 { margin: 0 0 12px 0; color: #fff; font-size: 18px; }
-    
+
     .name-box {
       display: flex;
       gap: 6px;
@@ -118,7 +116,7 @@
       font-weight: bold;
       font-size: 12px;
     }
-    
+
     .role-grid { display: flex; flex-direction: column; gap: 8px; width: 86%; margin-bottom: 14px; }
     .role-btn {
       padding: 11px 14px;
@@ -155,6 +153,31 @@
       display: none;
       z-index: 5;
     }
+
+    /* 카운트다운 오버레이 */
+    #countdownOverlay {
+      display: none;
+      position: absolute;
+      top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0, 0, 0, 0.45);
+      z-index: 20;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+    }
+    #countdownNumber {
+      font-size: 75px;
+      font-weight: 900;
+      color: #00ffcc;
+      text-shadow: 0 0 20px #00ffcc;
+      animation: pop 0.8s ease-out;
+    }
+    @keyframes pop {
+      0% { transform: scale(0.5); opacity: 0; }
+      50% { transform: scale(1.2); opacity: 1; }
+      100% { transform: scale(1.0); }
+    }
+
     #waitingOverlay { display: none; }
     .waiting-spinner {
       width: 38px;
@@ -169,7 +192,7 @@
   </style>
 </head>
 <body>
-  <div id="versionTitle">무수직반사_스코어버전8 (Angle Forced & Score System)</div>
+  <div id="versionTitle">빵패들_사운드카운트버전9 (Puffy Paddle & SFX)</div>
 
   <!-- 스코어보드 -->
   <div id="scoreboard">
@@ -179,10 +202,15 @@
   </div>
 
   <div id="waitingNoticeBanner">🔔 대기실에 참가자가 있습니다!</div>
-  
+
   <div id="container">
     <div id="stageBadge">STAGE 1 / 3</div>
     <canvas id="game" width="500" height="500"></canvas>
+
+    <!-- 카운트다운 레이어 -->
+    <div id="countdownOverlay">
+      <div id="countdownNumber">2</div>
+    </div>
 
     <!-- 로비 -->
     <div id="lobbyOverlay" class="overlay">
@@ -208,9 +236,9 @@
     <!-- 대기실 -->
     <div id="waitingOverlay" class="overlay">
       <div class="waiting-spinner"></div>
-      <h2 style="color:#ffcc00; margin-bottom:8px;">게임이 이미 진행 중입니다</h2>
+      <h2 style="color:#ffcc00; margin-bottom:8px;">게임이 진행 중입니다</h2>
       <p style="font-size:13px; color:#aaa; text-align:center; line-height:1.5; margin:0 0 16px 0;">
-        현재 대결 중인 라운드가 진행 중입니다.<br>
+        현재 라운드가 진행 중입니다.<br>
         <strong>[대기실]</strong>에서 관전하며 대기해 주세요.<br>
         다음 라운드 시작 시 즉시 참여할 수 있습니다!
       </p>
@@ -227,6 +255,8 @@
     const versionTitle = document.getElementById("versionTitle");
     const lobbyOverlay = document.getElementById("lobbyOverlay");
     const waitingOverlay = document.getElementById("waitingOverlay");
+    const countdownOverlay = document.getElementById("countdownOverlay");
+    const countdownNumber = document.getElementById("countdownNumber");
     const waitingNoticeBanner = document.getElementById("waitingNoticeBanner");
     const stageBadge = document.getElementById("stageBadge");
     const nameInput = document.getElementById("nameInput");
@@ -235,6 +265,74 @@
     const scoreLeft = document.getElementById("score-left");
     const scoreBottom = document.getElementById("score-bottom");
     const scoreRight = document.getElementById("score-right");
+
+    // ================= [Web Audio API 사운드 시스템] =================
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    let audioCtx = null;
+
+    function initAudio() {
+      if (!audioCtx) {
+        audioCtx = new AudioContext();
+      }
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+    }
+
+    function playSound(type) {
+      if (!audioCtx) return;
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      const now = audioCtx.currentTime;
+
+      if (type === "brick") {
+        // 벽돌 타격: 맑고 통쾌한 하이톤
+        osc.type = "triangle";
+        osc.frequency.setValueAtTime(880, now);
+        osc.frequency.exponentialRampToValueAtTime(1320, now + 0.08);
+        gain.gain.setValueAtTime(0.3, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.08);
+        osc.start(now);
+        osc.stop(now + 0.08);
+      } else if (type === "paddle") {
+        // 빵패들 타격: 탱글한 뿅 사운드
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(480, now);
+        osc.frequency.exponentialRampToValueAtTime(320, now + 0.1);
+        gain.gain.setValueAtTime(0.35, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+        osc.start(now);
+        osc.stop(now + 0.1);
+      } else if (type === "miss") {
+        // 실점 사운드: 쿵 떨어지는 베이스
+        osc.type = "sawtooth";
+        osc.frequency.setValueAtTime(160, now);
+        osc.frequency.exponentialRampToValueAtTime(60, now + 0.3);
+        gain.gain.setValueAtTime(0.3, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+        osc.start(now);
+        osc.stop(now + 0.3);
+      } else if (type === "beep") {
+        // 카운트다운 띱
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(600, now);
+        gain.gain.setValueAtTime(0.2, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+        osc.start(now);
+        osc.stop(now + 0.15);
+      } else if (type === "start") {
+        // 시작 삐-
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(1000, now);
+        gain.gain.setValueAtTime(0.3, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.35);
+        osc.start(now);
+        osc.stop(now + 0.35);
+      }
+    }
+    // ==============================================================
 
     const WS_URL = "wss://arkanoid-3p-multi.onrender.com";
     let ws = null;
@@ -270,6 +368,7 @@
 
         if (msg.type === "lobby_state") {
           versionTitle.innerText = `[ ${msg.title} ]`;
+          if (msg.names) playerNames = msg.names;
           updateLobbyUI(msg.slots);
           if (msg.scores) updateScoreboard(msg.scores, playerNames);
 
@@ -279,23 +378,37 @@
           } else {
             waitingNoticeBanner.style.display = "none";
           }
-        } 
+        }
         else if (msg.type === "waiting_room_notice") {
           lobbyOverlay.style.display = "none";
           waitingOverlay.style.display = "flex";
           stageBadge.style.display = "block";
           stageBadge.innerText = `STAGE ${msg.stage} / 3 (관전 대기 중)`;
+          if (msg.names) playerNames = msg.names;
           bricks = msg.bricks;
-        } 
-        else if (msg.type === "game_start") {
-          if (myRole) {
-            lobbyOverlay.style.display = "none";
-            waitingOverlay.style.display = "none";
-          }
-          stageBadge.style.display = "block";
+        }
+        else if (msg.type === "countdown") {
+          lobbyOverlay.style.display = "none";
+          waitingOverlay.style.display = "none";
+          countdownOverlay.style.display = "flex";
+          countdownNumber.innerText = msg.count;
+          playSound("beep");
+          if (msg.names) playerNames = msg.names;
           bricks = msg.bricks;
           deadBrickIds.clear();
-        } 
+        }
+        else if (msg.type === "game_start") {
+          countdownNumber.innerText = "START!";
+          playSound("start");
+          setTimeout(() => {
+            countdownOverlay.style.display = "none";
+          }, 500);
+
+          stageBadge.style.display = "block";
+          if (msg.names) playerNames = msg.names;
+          bricks = msg.bricks;
+          deadBrickIds.clear();
+        }
         else if (msg.type === "game_update") {
           ball = msg.ball;
           for (let r of ["bottom", "left", "right"]) {
@@ -303,11 +416,12 @@
               paddles[r] = msg.paddles[r];
             }
           }
-          playerNames = msg.names || playerNames;
+          if (msg.names) playerNames = msg.names;
           botSlots = msg.bot_slots || [];
           stageBadge.innerText = `STAGE ${msg.stage} / 3`;
           msg.bricks.forEach(id => deadBrickIds.add(id));
 
+          if (msg.sound) playSound(msg.sound);
           if (msg.scores) updateScoreboard(msg.scores, playerNames);
 
           if (msg.waiting_users && msg.waiting_users.length > 0 && myRole) {
@@ -328,6 +442,7 @@
     connectSocket();
 
     function changeName() {
+      initAudio();
       if (!nameInput.value.trim()) return;
       myName = nameInput.value.trim();
       if (ws && ws.readyState === WebSocket.OPEN) {
@@ -336,6 +451,7 @@
     }
 
     function changeWaitingName() {
+      initAudio();
       if (!waitingNameInput.value.trim()) return;
       myName = waitingNameInput.value.trim();
       if (ws && ws.readyState === WebSocket.OPEN) {
@@ -344,6 +460,7 @@
     }
 
     function selectRole(role) {
+      initAudio();
       if (!ws || ws.readyState !== WebSocket.OPEN) return;
       myRole = role;
       changeName();
@@ -351,6 +468,7 @@
     }
 
     function requestStart() {
+      initAudio();
       if (!ws || ws.readyState !== WebSocket.OPEN) return;
       ws.send(JSON.stringify({ type: "start_game" }));
     }
@@ -360,7 +478,7 @@
         const btn = document.getElementById(`btn-${r}`);
         const label = document.getElementById(`label-${r}`);
         const slotData = slots[r];
-        
+
         btn.classList.toggle("active", myRole === r);
         if (slotData.type === "USER") {
           label.innerText = (myRole === r ? "[나] " : "") + slotData.name;
@@ -373,6 +491,7 @@
     }
 
     canvas.addEventListener("touchstart", (e) => {
+      initAudio();
       const touch = e.touches[0];
       lastTouchX = touch.clientX;
       lastTouchY = touch.clientY;
@@ -408,31 +527,98 @@
       lastTouchY = null;
     });
 
-    function drawCurvedPaddle(x, y, w, h, color, labelText) {
-      ctx.fillStyle = color;
-      ctx.beginPath();
-      const r = Math.min(w, h) / 2;
-      ctx.roundRect(x, y, w, h, r);
-      ctx.fill();
-      ctx.closePath();
+    // ================= [빵처럼 부풀어오른 돔 패들 렌더러] =================
+    function drawPuffyPaddle(pos, role, color, name) {
+      ctx.save();
+      const pLen = 70;
+      const pThick = 14;
 
-      ctx.fillStyle = "#fff";
-      ctx.font = "bold 11px sans-serif";
-      if (w > h) {
+      if (role === "bottom") {
+        const cx = pos;
+        const cy = canvas.height - 16;
+
+        // 빵 모양 베이지/네온 그라데이션
+        const grad = ctx.createRadialGradient(cx, cy - 4, 2, cx, cy, pLen / 2);
+        grad.addColorStop(0, "#ffffff");
+        grad.addColorStop(0.3, color);
+        grad.addColorStop(1, "#0f172a");
+
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        // 앞면이 둥글게 부풀어오른 빵 돔 패스
+        ctx.moveTo(cx - pLen / 2, cy + 6);
+        ctx.bezierCurveTo(cx - pLen / 2, cy - pThick, cx + pLen / 2, cy - pThick, cx + pLen / 2, cy + 6);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        // 닉네임 라벨링
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "bold 12px sans-serif";
         ctx.textAlign = "center";
-        ctx.fillText(labelText, x + w / 2, y - 6);
-      } else {
-        ctx.textAlign = x < 50 ? "left" : "right";
-        ctx.fillText(labelText, x < 50 ? x + 16 : x - 6, y + h / 2 + 4);
+        ctx.fillText(name, cx, cy - pThick - 4);
+
+      } else if (role === "left") {
+        const cx = 16;
+        const cy = pos;
+
+        const grad = ctx.createRadialGradient(cx + 4, cy, 2, cx, cy, pLen / 2);
+        grad.addColorStop(0, "#ffffff");
+        grad.addColorStop(0.3, color);
+        grad.addColorStop(1, "#0f172a");
+
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.moveTo(cx - 6, cy - pLen / 2);
+        ctx.bezierCurveTo(cx + pThick, cy - pLen / 2, cx + pThick, cy + pLen / 2, cx - 6, cy + pLen / 2);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "bold 12px sans-serif";
+        ctx.textAlign = "left";
+        ctx.fillText(name, cx + pThick + 6, cy + 4);
+
+      } else if (role === "right") {
+        const cx = canvas.width - 16;
+        const cy = pos;
+
+        const grad = ctx.createRadialGradient(cx - 4, cy, 2, cx, cy, pLen / 2);
+        grad.addColorStop(0, "#ffffff");
+        grad.addColorStop(0.3, color);
+        grad.addColorStop(1, "#0f172a");
+
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.moveTo(cx + 6, cy - pLen / 2);
+        ctx.bezierCurveTo(cx - pThick, cy - pLen / 2, cx - pThick, cy + pLen / 2, cx + 6, cy + pLen / 2);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "bold 12px sans-serif";
+        ctx.textAlign = "right";
+        ctx.fillText(name, cx - pThick - 6, cy + 4);
       }
+      ctx.restore();
     }
 
     function render() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+      // 상단 천장
       ctx.fillStyle = "#333";
       ctx.fillRect(0, 0, canvas.width, 10);
 
+      // 벽돌
       bricks.forEach(b => {
         if (!deadBrickIds.has(b.id)) {
           ctx.fillStyle = "#2c5282";
@@ -442,15 +628,17 @@
         }
       });
 
+      // 빵패들 3종 렌더링 (이름 보장)
       const isBotBottom = botSlots.includes("bottom");
-      drawCurvedPaddle(paddles.bottom - 35, canvas.height - 20, 70, 10, isBotBottom ? "#555" : "#00ffcc", playerNames.bottom);
+      drawPuffyPaddle(paddles.bottom, "bottom", isBotBottom ? "#64748b" : "#00ffcc", playerNames.bottom);
 
       const isBotLeft = botSlots.includes("left");
-      drawCurvedPaddle(10, paddles.left - 35, 10, 70, isBotLeft ? "#555" : "#ff007f", playerNames.left);
+      drawPuffyPaddle(paddles.left, "left", isBotLeft ? "#64748b" : "#ff007f", playerNames.left);
 
       const isBotRight = botSlots.includes("right");
-      drawCurvedPaddle(canvas.width - 20, paddles.right - 35, 10, 70, isBotRight ? "#555" : "#ffaa00", playerNames.right);
+      drawPuffyPaddle(paddles.right, "right", isBotRight ? "#64748b" : "#ffaa00", playerNames.right);
 
+      // 공
       ctx.beginPath();
       ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
       ctx.fillStyle = "#fff";
