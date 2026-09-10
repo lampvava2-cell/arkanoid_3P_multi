@@ -154,7 +154,6 @@
       z-index: 5;
     }
 
-    /* 카운트다운 오버레이 */
     #countdownOverlay {
       display: none;
       position: absolute;
@@ -192,7 +191,7 @@
   </style>
 </head>
 <body>
-  <div id="versionTitle">빵패들_사운드카운트버전9 (Puffy Paddle & SFX)</div>
+  <div id="versionTitle">스타트픽스_버전9.1 (Start Bug Fixed)</div>
 
   <!-- 스코어보드 -->
   <div id="scoreboard">
@@ -217,20 +216,20 @@
       <h2>포지션 선택 및 참가</h2>
       <div class="name-box">
         <input type="text" id="nameInput" placeholder="닉네임 입력 (최대 6자)" maxlength="6">
-        <button onclick="changeName()">확인</button>
+        <button type="button" onclick="changeName()">확인</button>
       </div>
       <div class="role-grid">
-        <button class="role-btn" id="btn-bottom" onclick="selectRole('bottom')">
+        <button type="button" class="role-btn" id="btn-bottom" onclick="selectRole('bottom')">
           <span>하단 (가로)</span> <span id="label-bottom">BOT</span>
         </button>
-        <button class="role-btn" id="btn-left" onclick="selectRole('left')">
+        <button type="button" class="role-btn" id="btn-left" onclick="selectRole('left')">
           <span>좌측 (세로)</span> <span id="label-left">BOT</span>
         </button>
-        <button class="role-btn" id="btn-right" onclick="selectRole('right')">
+        <button type="button" class="role-btn" id="btn-right" onclick="selectRole('right')">
           <span>우측 (세로)</span> <span id="label-right">BOT</span>
         </button>
       </div>
-      <button id="startBtn" onclick="requestStart()">GAME START</button>
+      <button type="button" id="startBtn" onclick="requestStart()">GAME START</button>
     </div>
 
     <!-- 대기실 -->
@@ -244,7 +243,7 @@
       </p>
       <div class="name-box" style="width:75%;">
         <input type="text" id="waitingNameInput" placeholder="내 닉네임 설정" maxlength="6">
-        <button onclick="changeWaitingName()">등록</button>
+        <button type="button" onclick="changeWaitingName()">등록</button>
       </div>
     </div>
   </div>
@@ -266,17 +265,13 @@
     const scoreBottom = document.getElementById("score-bottom");
     const scoreRight = document.getElementById("score-right");
 
-    // ================= [Web Audio API 사운드 시스템] =================
+    // Audio Context
     const AudioContext = window.AudioContext || window.webkitAudioContext;
     let audioCtx = null;
 
     function initAudio() {
-      if (!audioCtx) {
-        audioCtx = new AudioContext();
-      }
-      if (audioCtx.state === 'suspended') {
-        audioCtx.resume();
-      }
+      if (!audioCtx) audioCtx = new AudioContext();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
     }
 
     function playSound(type) {
@@ -288,7 +283,6 @@
       const now = audioCtx.currentTime;
 
       if (type === "brick") {
-        // 벽돌 타격: 맑고 통쾌한 하이톤
         osc.type = "triangle";
         osc.frequency.setValueAtTime(880, now);
         osc.frequency.exponentialRampToValueAtTime(1320, now + 0.08);
@@ -297,7 +291,6 @@
         osc.start(now);
         osc.stop(now + 0.08);
       } else if (type === "paddle") {
-        // 빵패들 타격: 탱글한 뿅 사운드
         osc.type = "sine";
         osc.frequency.setValueAtTime(480, now);
         osc.frequency.exponentialRampToValueAtTime(320, now + 0.1);
@@ -306,7 +299,6 @@
         osc.start(now);
         osc.stop(now + 0.1);
       } else if (type === "miss") {
-        // 실점 사운드: 쿵 떨어지는 베이스
         osc.type = "sawtooth";
         osc.frequency.setValueAtTime(160, now);
         osc.frequency.exponentialRampToValueAtTime(60, now + 0.3);
@@ -315,7 +307,6 @@
         osc.start(now);
         osc.stop(now + 0.3);
       } else if (type === "beep") {
-        // 카운트다운 띱
         osc.type = "sine";
         osc.frequency.setValueAtTime(600, now);
         gain.gain.setValueAtTime(0.2, now);
@@ -323,7 +314,6 @@
         osc.start(now);
         osc.stop(now + 0.15);
       } else if (type === "start") {
-        // 시작 삐-
         osc.type = "sine";
         osc.frequency.setValueAtTime(1000, now);
         gain.gain.setValueAtTime(0.3, now);
@@ -332,7 +322,6 @@
         osc.stop(now + 0.35);
       }
     }
-    // ==============================================================
 
     const WS_URL = "wss://arkanoid-3p-multi.onrender.com";
     let ws = null;
@@ -469,7 +458,19 @@
 
     function requestStart() {
       initAudio();
-      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        alert("서버 연결 중입니다. 잠시 후 다시 눌러주세요.");
+        return;
+      }
+      // 이름 즉시 전송
+      changeName();
+
+      // 포지션을 아직 안 골랐다면 자동으로 'bottom(하단)' 배정
+      if (!myRole) {
+        selectRole('bottom');
+      }
+
+      // 서버로 게임 스타트 요청
       ws.send(JSON.stringify({ type: "start_game" }));
     }
 
@@ -527,7 +528,6 @@
       lastTouchY = null;
     });
 
-    // ================= [빵처럼 부풀어오른 돔 패들 렌더러] =================
     function drawPuffyPaddle(pos, role, color, name) {
       ctx.save();
       const pLen = 70;
@@ -536,8 +536,6 @@
       if (role === "bottom") {
         const cx = pos;
         const cy = canvas.height - 16;
-
-        // 빵 모양 베이지/네온 그라데이션
         const grad = ctx.createRadialGradient(cx, cy - 4, 2, cx, cy, pLen / 2);
         grad.addColorStop(0, "#ffffff");
         grad.addColorStop(0.3, color);
@@ -545,7 +543,6 @@
 
         ctx.fillStyle = grad;
         ctx.beginPath();
-        // 앞면이 둥글게 부풀어오른 빵 돔 패스
         ctx.moveTo(cx - pLen / 2, cy + 6);
         ctx.bezierCurveTo(cx - pLen / 2, cy - pThick, cx + pLen / 2, cy - pThick, cx + pLen / 2, cy + 6);
         ctx.closePath();
@@ -554,7 +551,6 @@
         ctx.lineWidth = 1.5;
         ctx.stroke();
 
-        // 닉네임 라벨링
         ctx.fillStyle = "#ffffff";
         ctx.font = "bold 12px sans-serif";
         ctx.textAlign = "center";
@@ -563,7 +559,6 @@
       } else if (role === "left") {
         const cx = 16;
         const cy = pos;
-
         const grad = ctx.createRadialGradient(cx + 4, cy, 2, cx, cy, pLen / 2);
         grad.addColorStop(0, "#ffffff");
         grad.addColorStop(0.3, color);
@@ -587,7 +582,6 @@
       } else if (role === "right") {
         const cx = canvas.width - 16;
         const cy = pos;
-
         const grad = ctx.createRadialGradient(cx - 4, cy, 2, cx, cy, pLen / 2);
         grad.addColorStop(0, "#ffffff");
         grad.addColorStop(0.3, color);
@@ -614,11 +608,9 @@
     function render() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      // 상단 천장
       ctx.fillStyle = "#333";
       ctx.fillRect(0, 0, canvas.width, 10);
 
-      // 벽돌
       bricks.forEach(b => {
         if (!deadBrickIds.has(b.id)) {
           ctx.fillStyle = "#2c5282";
@@ -628,7 +620,6 @@
         }
       });
 
-      // 빵패들 3종 렌더링 (이름 보장)
       const isBotBottom = botSlots.includes("bottom");
       drawPuffyPaddle(paddles.bottom, "bottom", isBotBottom ? "#64748b" : "#00ffcc", playerNames.bottom);
 
@@ -638,7 +629,6 @@
       const isBotRight = botSlots.includes("right");
       drawPuffyPaddle(paddles.right, "right", isBotRight ? "#64748b" : "#ffaa00", playerNames.right);
 
-      // 공
       ctx.beginPath();
       ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
       ctx.fillStyle = "#fff";
