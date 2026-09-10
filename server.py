@@ -10,7 +10,7 @@ import websockets
 WIDTH = 500
 HEIGHT = 500
 
-VERSION_TITLE = "무수직반사_스코어버전10 (Magic Orb Rail)"
+VERSION_TITLE = "무수직반사_스코어버전11 (Huge Rail & Sound System)"
 
 SLOTS = {"bottom": None, "left": None, "right": None}
 PLAYER_NAMES = {"bottom": "BOT", "left": "BOT", "right": "BOT"}
@@ -40,24 +40,25 @@ ball = {
 
 bricks = []
 
-# [마법구슬 및 원형 레일 상태 변수]
+# [초대형 고정 원형 레일 및 마법구슬 설정]
+# 중심 (250, 250), 반지름 205 (패들 바로 앞인 22px~25px 지점을 아슬아슬하게 통과)
 orb = {
     "angle": 0.0,
-    "speed": 0.045,      # 회전 속도 (rad/frame)
-    "radius": 11,        # 마법구슬 크기
+    "speed": 0.048,      # 궤도 공전 속도
+    "radius": 13,        # 구슬 피격 판정 반지름
     "cx": 250,
-    "cy": 230,
-    "rail_r": 135
+    "cy": 250,
+    "rail_r": 205
 }
 
 def generate_stage(stage_num):
     new_bricks = []
     brick_id = 0
-    center_x, center_y = WIDTH / 2, HEIGHT / 2 - 20
+    center_x, center_y = WIDTH / 2, HEIGHT / 2 - 10
     if stage_num == 1:
         rows, cols = 6, 6
         start_x = (WIDTH - (cols * 36)) / 2 + 3
-        start_y = (HEIGHT - (rows * 22)) / 2 - 20
+        start_y = (HEIGHT - (rows * 22)) / 2 - 10
         for r in range(rows):
             for c in range(cols):
                 new_bricks.append({"id": brick_id, "x": start_x + c * 36, "y": start_y + r * 22, "w": 30, "h": 14, "alive": True})
@@ -85,36 +86,7 @@ def reset_ball():
     ball["vy"] = -abs(BALL_BASE_SPEED * math.cos(angle))
     last_hitter = None
 
-def update_rail_geometry():
-    """남은 블록들의 분포에 맞추어 원형 레일의 중심과 반지름을 동적으로 연동"""
-    global orb
-    alive_bricks = [b for b in bricks if b["alive"]]
-    if not alive_bricks:
-        return
-
-    min_x = min(b["x"] for b in alive_bricks)
-    max_x = max(b["x"] + b["w"] for b in alive_bricks)
-    min_y = min(b["y"] for b in alive_bricks)
-    max_y = max(b["y"] + b["h"] for b in alive_bricks)
-
-    cx = (min_x + max_x) / 2
-    cy = (min_y + max_y) / 2
-
-    # 중심에서 가장 먼 코너까지의 거리 + 여유 마진 18px
-    max_dist = 0
-    for b in alive_bricks:
-        for px in [b["x"], b["x"] + b["w"]]:
-            for py in [b["y"], b["y"] + b["h"]]:
-                d = math.hypot(px - cx, py - cy)
-                if d > max_dist:
-                    max_dist = d
-
-    orb["cx"] = cx
-    orb["cy"] = cy
-    orb["rail_r"] = max(45, max_dist + 18)
-
 bricks = generate_stage(current_stage)
-update_rail_geometry()
 
 def update_ai():
     ai_speed = 6.2
@@ -179,9 +151,10 @@ async def game_loop():
     while True:
         now = time.time()
         is_paused = (now < pause_until)
+        sound_event = None
 
         if game_started:
-            # 1. 마법구슬 레일 위 궤도 회전
+            # 마법구슬 공전 회전
             orb["angle"] = (orb["angle"] + orb["speed"]) % (2 * math.pi)
             orb_x = orb["cx"] + orb["rail_r"] * math.cos(orb["angle"])
             orb_y = orb["cy"] + orb["rail_r"] * math.sin(orb["angle"])
@@ -197,36 +170,38 @@ async def game_loop():
                     ball["x"] += step_vx
                     ball["y"] += step_vy
 
-                    # [핵심] 마법구슬과 공의 충돌 및 레일 내부 랜덤 토스 판정
+                    # [핵심] 마법구슬 충돌: 안/밖 상관없이 원형 서클 내부 방향으로 강력 토스
                     d_orb = math.hypot(ball["x"] - orb_x, ball["y"] - orb_y)
                     if d_orb <= (ball["radius"] + orb["radius"]):
-                        # 구슬 위치에서 서클 중심을 향하는 기본 각도 계산
+                        # 구슬에서 서클 정중앙(250, 250)을 바라보는 각도 계산
                         center_dir = math.atan2(orb["cy"] - orb_y, orb["cx"] - orb_x)
-                        # 내부 방향으로 ±45도(π/4) 범위 내 랜덤 반사각 생성
+                        # 중심 방향을 기준으로 ±45도(π/4) 범위 내 랜덤 반사각
                         toss_angle = center_dir + random.uniform(-math.pi / 4, math.pi / 4)
                         
-                        ball["vx"] = BALL_BASE_SPEED * 1.15 * math.cos(toss_angle)
-                        ball["vy"] = BALL_BASE_SPEED * 1.15 * math.sin(toss_angle)
+                        ball["vx"] = BALL_BASE_SPEED * 1.2 * math.cos(toss_angle)
+                        ball["vy"] = BALL_BASE_SPEED * 1.2 * math.sin(toss_angle)
                         ball["vx"], ball["vy"] = enforce_non_vertical(ball["vx"], ball["vy"], "y")
                         
-                        # 구슬 밖으로 공 밀어내기
-                        push_dist = ball["radius"] + orb["radius"] + 2.0
-                        ball["x"] = orb_x + push_dist * math.cos(toss_angle)
-                        ball["y"] = orb_y + push_dist * math.sin(toss_angle)
+                        # 중심 방향으로 공을 밀어내어 연쇄 충돌 방지
+                        push_dist = ball["radius"] + orb["radius"] + 3.0
+                        ball["x"] = orb_x + push_dist * math.cos(center_dir)
+                        ball["y"] = orb_y + push_dist * math.sin(center_dir)
 
                         step_vx = ball["vx"] / sub_steps
                         step_vy = ball["vy"] / sub_steps
+                        sound_event = "orb"
                         break
 
-                    # 2. 천장
+                    # 1. 상단 천장
                     if ball["y"] - ball["radius"] <= 10:
                         ball["y"] = 10 + ball["radius"]
                         ball["vy"] = abs(ball["vy"])
                         ball["vx"], ball["vy"] = enforce_non_vertical(ball["vx"], ball["vy"], "y")
                         step_vx = ball["vx"] / sub_steps
                         step_vy = ball["vy"] / sub_steps
+                        sound_event = "wall"
 
-                    # 3. 하단 패들
+                    # 2. 하단 패들
                     if ball["y"] + ball["radius"] >= HEIGHT - 22:
                         pad_x = paddle_positions["bottom"]
                         if pad_x - P_LEN / 2 <= ball["x"] <= pad_x + P_LEN / 2:
@@ -242,12 +217,14 @@ async def game_loop():
                             step_vx = ball["vx"] / sub_steps
                             step_vy = ball["vy"] / sub_steps
                             last_hitter = "bottom"
+                            sound_event = "paddle"
                         elif ball["y"] > HEIGHT + 30:
                             SCORES["bottom"] = max(0, SCORES["bottom"] - 200)
+                            sound_event = "lose"
                             reset_ball()
                             break
 
-                    # 4. 좌측 패들
+                    # 3. 좌측 패들
                     if ball["x"] - ball["radius"] <= 22:
                         pad_y = paddle_positions["left"]
                         if pad_y - P_LEN / 2 <= ball["y"] <= pad_y + P_LEN / 2:
@@ -264,12 +241,14 @@ async def game_loop():
                             step_vx = ball["vx"] / sub_steps
                             step_vy = ball["vy"] / sub_steps
                             last_hitter = "left"
+                            sound_event = "paddle"
                         elif ball["x"] < -30:
                             SCORES["left"] = max(0, SCORES["left"] - 200)
+                            sound_event = "lose"
                             reset_ball()
                             break
 
-                    # 5. 우측 패들
+                    # 4. 우측 패들
                     if ball["x"] + ball["radius"] >= WIDTH - 22:
                         pad_y = paddle_positions["right"]
                         if pad_y - P_LEN / 2 <= ball["y"] <= pad_y + P_LEN / 2:
@@ -286,14 +265,15 @@ async def game_loop():
                             step_vx = ball["vx"] / sub_steps
                             step_vy = ball["vy"] / sub_steps
                             last_hitter = "right"
+                            sound_event = "paddle"
                         elif ball["x"] > WIDTH + 30:
                             SCORES["right"] = max(0, SCORES["right"] - 200)
+                            sound_event = "lose"
                             reset_ball()
                             break
 
-                    # 6. 벽돌 충돌
+                    # 5. 벽돌 충돌
                     r = ball["radius"]
-                    hit_brick = False
                     for b in bricks:
                         if not b["alive"]:
                             continue
@@ -306,7 +286,7 @@ async def game_loop():
 
                         if (dist_x * dist_x + dist_y * dist_y) < (r * r):
                             b["alive"] = False
-                            hit_brick = True
+                            sound_event = "brick"
                             if last_hitter in SCORES:
                                 SCORES[last_hitter] += 100
 
@@ -325,14 +305,10 @@ async def game_loop():
                                 ball["y"] = b["y"] - r - 0.5 if overlap_top < overlap_bottom else b["y"] + b["h"] + r + 0.5
                             break
 
-                    if hit_brick:
-                        update_rail_geometry()
-
                 if sum(1 for b in bricks if b["alive"]) == 0:
                     current_stage = (current_stage % TOTAL_STAGES) + 1
                     bricks = generate_stage(current_stage)
                     reset_ball()
-                    update_rail_geometry()
                     pause_until = time.time() + 2.0
 
             bot_list = [role for role, ws in SLOTS.items() if ws is None]
@@ -350,6 +326,7 @@ async def game_loop():
                 "waiting_users": waiting_users,
                 "bricks": [b["id"] for b in bricks if not b["alive"]],
                 "pause_sec": remaining_pause,
+                "sound": sound_event,
                 "orb": {
                     "x": orb["cx"] + orb["rail_r"] * math.cos(orb["angle"]),
                     "y": orb["cy"] + orb["rail_r"] * math.sin(orb["angle"]),
@@ -432,7 +409,6 @@ async def handler(websocket):
                     current_stage = 1
                     SCORES = {"bottom": 0, "left": 0, "right": 0}
                     bricks = generate_stage(current_stage)
-                    update_rail_geometry()
                     reset_ball()
                     game_started = True
                     pause_until = time.time() + 2.0
