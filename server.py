@@ -1,6 +1,7 @@
 import asyncio
 import json
 import math
+import os
 import random
 import websockets
 
@@ -17,7 +18,7 @@ CONNECTED_CLIENTS = {}
 game_started = False
 current_stage = 1
 TOTAL_STAGES = 3
-last_hitter = None  # 마지막으로 공을 친 슬롯 ("bottom", "left", "right")
+last_hitter = None
 
 paddle_positions = {
     "bottom": WIDTH / 2,
@@ -66,7 +67,6 @@ def reset_ball():
     global ball, last_hitter
     ball["x"] = WIDTH / 2
     ball["y"] = HEIGHT / 2 + 80
-    # 발사 시에도 완벽한 수직 발사 배제
     angle = random.choice([-1, 1]) * random.uniform(0.35, 0.75)
     ball["vx"] = BALL_BASE_SPEED * math.sin(angle)
     ball["vy"] = -abs(BALL_BASE_SPEED * math.cos(angle))
@@ -100,7 +100,7 @@ async def broadcast_lobby():
         ws = SLOTS[role]
         slots_info[role] = {"type": "BOT" if ws is None else "USER", "name": PLAYER_NAMES[role]}
 
-    waiting_users = [info["name"] for ws, info in CONNECTED_CLIENTS.items() if info["state"] == "waiting"]
+    waiting_users = [info["name"] for ws, info in CONNECTED_CLIENTS.items() if info.get("state") == "waiting"]
 
     payload = json.dumps({
         "type": "lobby_state",
@@ -114,18 +114,15 @@ async def broadcast_lobby():
     for ws in list(CONNECTED_CLIENTS.keys()):
         try:
             await ws.send(payload)
-        except:
+        except Exception:
             pass
 
 def enforce_non_vertical(vx, vy, base_dir="y"):
-    """수직/수평 단조 궤적 완전 제거 및 속도 정규화"""
     min_component = 2.4
     if base_dir == "y":
-        # 하단 패들 반사: 수직(vx=0) 방지
         if abs(vx) < min_component:
             vx = min_component if vx >= 0 else -min_component
     else:
-        # 좌/우 패들 반사: 수평(vy=0) 방지
         if abs(vy) < min_component:
             vy = min_component if vy >= 0 else -min_component
 
@@ -163,11 +160,9 @@ async def game_loop():
                     if pad_x - P_LEN / 2 <= ball["x"] <= pad_x + P_LEN / 2:
                         ball["y"] = HEIGHT - 22 - ball["radius"]
                         offset = (ball["x"] - pad_x) / (P_LEN / 2)
-                        
-                        # [무수직 반사] 정중앙 타격 시 강제로 최소 20도 각도 부여
                         if abs(offset) < 0.22:
                             offset = 0.35 if offset >= 0 else -0.35
-                        
+
                         rebound_angle = offset * (math.pi / 2.8)
                         ball["vx"] = BALL_BASE_SPEED * math.sin(rebound_angle)
                         ball["vy"] = -BALL_BASE_SPEED * math.cos(rebound_angle)
@@ -176,7 +171,7 @@ async def game_loop():
                         step_vy = ball["vy"] / sub_steps
                         last_hitter = "bottom"
                     elif ball["y"] > HEIGHT + 30:
-                        SCORES["bottom"] = max(0, SCORES["bottom"] - 200)  # 실점
+                        SCORES["bottom"] = max(0, SCORES["bottom"] - 200)
                         reset_ball()
                         break
 
@@ -187,8 +182,8 @@ async def game_loop():
                         ball["x"] = 22 + ball["radius"]
                         offset = (ball["y"] - pad_y) / (P_LEN / 2)
                         if abs(offset) < 0.22:
-                            offset = -0.35  # 상향 각도 편향
-                        
+                            offset = -0.35
+
                         adj_offset = max(-1.0, min(1.0, offset - 0.2))
                         rebound_angle = adj_offset * (math.pi / 2.9)
                         ball["vx"] = BALL_BASE_SPEED * math.cos(rebound_angle)
@@ -198,7 +193,7 @@ async def game_loop():
                         step_vy = ball["vy"] / sub_steps
                         last_hitter = "left"
                     elif ball["x"] < -30:
-                        SCORES["left"] = max(0, SCORES["left"] - 200)  # 실점
+                        SCORES["left"] = max(0, SCORES["left"] - 200)
                         reset_ball()
                         break
 
@@ -210,7 +205,7 @@ async def game_loop():
                         offset = (ball["y"] - pad_y) / (P_LEN / 2)
                         if abs(offset) < 0.22:
                             offset = -0.35
-                        
+
                         adj_offset = max(-1.0, min(1.0, offset - 0.2))
                         rebound_angle = adj_offset * (math.pi / 2.9)
                         ball["vx"] = -BALL_BASE_SPEED * math.cos(rebound_angle)
@@ -220,11 +215,11 @@ async def game_loop():
                         step_vy = ball["vy"] / sub_steps
                         last_hitter = "right"
                     elif ball["x"] > WIDTH + 30:
-                        SCORES["right"] = max(0, SCORES["right"] - 200)  # 실점
+                        SCORES["right"] = max(0, SCORES["right"] - 200)
                         reset_ball()
                         break
 
-                # 5. 벽돌 정밀 충돌 판정 및 점수 계산
+                # 5. 벽돌 충돌 및 점수
                 r = ball["radius"]
                 for b in bricks:
                     if not b["alive"]:
@@ -238,8 +233,6 @@ async def game_loop():
 
                     if (dist_x * dist_x + dist_y * dist_y) < (r * r):
                         b["alive"] = False
-                        
-                        # [득점 시스템] 마지막 타격자에게 100점 가산
                         if last_hitter in SCORES:
                             SCORES[last_hitter] += 100
 
@@ -251,3 +244,134 @@ async def game_loop():
                         if min(overlap_left, overlap_right) < min(overlap_top, overlap_bottom):
                             ball["vx"] = -ball["vx"]
                             step_vx = -step_vx
+                            ball["x"] = b["x"] - r - 0.5 if overlap_left < overlap_right else b["x"] + b["w"] + r + 0.5
+                        else:
+                            ball["vy"] = -ball["vy"]
+                            step_vy = -step_vy
+                            ball["y"] = b["y"] - r - 0.5 if overlap_top < overlap_bottom else b["y"] + b["h"] + r + 0.5
+                        break
+
+            # 스테이지 클리어
+            if sum(1 for b in bricks if b["alive"]) == 0:
+                current_stage = (current_stage % TOTAL_STAGES) + 1
+                bricks = generate_stage(current_stage)
+                reset_ball()
+
+            bot_list = [role for role, ws in SLOTS.items() if ws is None]
+            waiting_users = [info["name"] for ws, info in CONNECTED_CLIENTS.items() if info.get("state") == "waiting"]
+
+            payload = json.dumps({
+                "type": "game_update",
+                "ball": ball,
+                "paddles": paddle_positions,
+                "names": PLAYER_NAMES,
+                "scores": SCORES,
+                "bot_slots": bot_list,
+                "stage": current_stage,
+                "waiting_users": waiting_users,
+                "bricks": [b["id"] for b in bricks if not b["alive"]]
+            })
+            for ws in list(CONNECTED_CLIENTS.keys()):
+                try:
+                    await ws.send(payload)
+                except Exception:
+                    pass
+
+        await asyncio.sleep(0.016)
+
+async def handler(websocket):
+    # [핵심 수정] 전역 변수를 함수 최상단에 선언하여 UnboundLocalError 원천 차단
+    global game_started, current_stage, bricks, SCORES
+
+    state = "waiting" if game_started else "lobby"
+    CONNECTED_CLIENTS[websocket] = {"role": None, "name": f"게스트{random.randint(100, 999)}", "state": state}
+
+    if game_started:
+        await websocket.send(json.dumps({
+            "type": "waiting_room_notice",
+            "bricks": bricks,
+            "stage": current_stage
+        }))
+    await broadcast_lobby()
+
+    try:
+        async for message in websocket:
+            try:
+                data = json.loads(message)
+                msg_type = data.get("type")
+
+                if msg_type == "set_name":
+                    client_name = str(data.get("name", "익명")).strip()[:10]
+                    if client_name:
+                        CONNECTED_CLIENTS[websocket]["name"] = client_name
+                        role = CONNECTED_CLIENTS[websocket]["role"]
+                        if role:
+                            PLAYER_NAMES[role] = client_name
+                    await broadcast_lobby()
+
+                elif msg_type == "select_role":
+                    if game_started:
+                        continue
+                    role = data.get("role")
+                    for r in ["bottom", "left", "right"]:
+                        if SLOTS[r] == websocket:
+                            SLOTS[r] = None
+                            PLAYER_NAMES[r] = "BOT"
+                    if role in SLOTS:
+                        SLOTS[role] = websocket
+                        PLAYER_NAMES[role] = CONNECTED_CLIENTS[websocket]["name"]
+                        CONNECTED_CLIENTS[websocket]["role"] = role
+                    await broadcast_lobby()
+
+                elif msg_type == "start_game":
+                    current_stage = 1
+                    SCORES = {"bottom": 0, "left": 0, "right": 0}
+                    bricks = generate_stage(current_stage)
+                    reset_ball()
+                    game_started = True
+                    for ws in CONNECTED_CLIENTS:
+                        CONNECTED_CLIENTS[ws]["state"] = "playing" if CONNECTED_CLIENTS[ws]["role"] else "waiting"
+
+                    init_payload = json.dumps({
+                        "type": "game_start",
+                        "stage": current_stage,
+                        "bricks": bricks
+                    })
+                    for ws in list(CONNECTED_CLIENTS.keys()):
+                        try:
+                            await ws.send(init_payload)
+                        except Exception:
+                            pass
+                    await broadcast_lobby()
+
+                elif msg_type == "move":
+                    role = CONNECTED_CLIENTS[websocket]["role"]
+                    if role and game_started:
+                        max_limit = WIDTH - 35 if role == "bottom" else HEIGHT - 35
+                        paddle_positions[role] = max(35, min(max_limit, float(data["pos"])))
+
+            except Exception as parse_err:
+                print(f"[메시지 파싱 에러 방어]: {parse_err}")
+
+    except websockets.ConnectionClosed:
+        pass
+    finally:
+        for r in ["bottom", "left", "right"]:
+            if SLOTS[r] == websocket:
+                SLOTS[r] = None
+                PLAYER_NAMES[r] = "BOT"
+        CONNECTED_CLIENTS.pop(websocket, None)
+
+        active_users = [ws for ws, info in CONNECTED_CLIENTS.items() if info.get("role")]
+        if len(active_users) == 0:
+            game_started = False
+        await broadcast_lobby()
+
+async def main():
+    port = int(os.environ.get("PORT", 8765))
+    server = await websockets.serve(handler, "0.0.0.0", port)
+    print(f"[{VERSION_TITLE}] 서버 가동 시작... 포트: {port}")
+    await asyncio.gather(server.wait_closed(), game_loop())
+
+if __name__ == "__main__":
+    asyncio.run(main())
