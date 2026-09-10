@@ -91,7 +91,7 @@
   </style>
 </head>
 <body>
-  <div id="versionTitle">속도개선버전3 (Stage & Lobby Update)</div>
+  <div id="versionTitle">무한핑퐁방지버전4 (Curved Paddle & Anti-Stall)</div>
   
   <div id="container">
     <div id="stageBadge">STAGE 1 / 3</div>
@@ -133,7 +133,7 @@
     let botSlots = ["bottom", "left", "right"];
 
     function connectSocket() {
-      connInfo.innerText = "서버 연결 시도 중 (무료 서버는 최초 30초 소요)...";
+      connInfo.innerText = "서버 연결 시도 중...";
       connInfo.style.color = "#ffaa00";
 
       ws = new WebSocket(WS_URL);
@@ -171,7 +171,7 @@
       };
 
       ws.onerror = () => {
-        connInfo.innerText = "서버 응답 지연 중... 잠시만 기다려주세요.";
+        connInfo.innerText = "서버 연결 대기 중...";
       };
     }
 
@@ -222,6 +222,16 @@
     canvas.addEventListener("touchmove", handleTouch, { passive: false });
     canvas.addEventListener("touchstart", handleTouch, { passive: false });
 
+    // 둥근 캡슐형(볼록) 패들 렌더링 헬퍼 함수
+    function drawCurvedPaddle(x, y, w, h, color, isVertical) {
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      const r = Math.min(w, h) / 2;
+      ctx.roundRect(x, y, w, h, r);
+      ctx.fill();
+      ctx.closePath();
+    }
+
     function render() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -229,7 +239,7 @@
       ctx.fillStyle = "#333";
       ctx.fillRect(0, 0, canvas.width, 10);
 
-      // 벽돌 렌더링
+      // 벽돌
       bricks.forEach(b => {
         if (!deadBrickIds.has(b.id)) {
           ctx.fillStyle = "#2c5282";
@@ -239,20 +249,17 @@
         }
       });
 
-      // 패들 렌더링
+      // 둥근 볼록 패들 3종
       const isBotBottom = botSlots.includes("bottom");
-      ctx.fillStyle = isBotBottom ? "#555" : "#00ffcc";
-      ctx.fillRect(paddles.bottom - 32.5, canvas.height - 20, 65, 10);
+      drawCurvedPaddle(paddles.bottom - 32.5, canvas.height - 20, 65, 10, isBotBottom ? "#555" : "#00ffcc", false);
 
       const isBotLeft = botSlots.includes("left");
-      ctx.fillStyle = isBotLeft ? "#555" : "#ff007f";
-      ctx.fillRect(10, paddles.left - 32.5, 10, 65);
+      drawCurvedPaddle(10, paddles.left - 32.5, 10, 65, isBotLeft ? "#555" : "#ff007f", true);
 
       const isBotRight = botSlots.includes("right");
-      ctx.fillStyle = isBotRight ? "#555" : "#ffaa00";
-      ctx.fillRect(canvas.width - 20, paddles.right - 32.5, 10, 65);
+      drawCurvedPaddle(canvas.width - 20, paddles.right - 32.5, 10, 65, isBotRight ? "#555" : "#ffaa00", true);
 
-      // 공 렌더링
+      // 공
       ctx.beginPath();
       ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
       ctx.fillStyle = "#fff";
