@@ -7,7 +7,7 @@
   <style>
     body {
       margin: 0;
-      background: #111;
+      background: #0d0e15;
       color: #fff;
       display: flex;
       flex-direction: column;
@@ -16,58 +16,192 @@
       height: 100vh;
       overflow: hidden;
       touch-action: none;
-      font-family: sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
-    #status { margin-bottom: 8px; font-size: 14px; font-weight: bold; }
-    canvas {
-      background: #1a1a1a;
-      border: 2px solid #555;
-      box-shadow: 0 0 15px rgba(0,255,255,0.2);
+    #versionTitle {
+      font-size: 13px;
+      color: #00ffcc;
+      font-weight: bold;
+      margin-bottom: 6px;
+      letter-spacing: 0.5px;
+    }
+    #container {
+      position: relative;
+      width: 380px;
+      height: 580px;
+      border: 2px solid #333;
+      box-shadow: 0 0 20px rgba(0,255,255,0.15);
+      background: #151722;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    canvas { width: 100%; height: 100%; display: block; }
+    
+    #lobbyOverlay {
+      position: absolute;
+      top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(13, 14, 21, 0.94);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 10;
+    }
+    h2 { margin: 0 0 16px 0; color: #fff; font-size: 19px; }
+    #connectionInfo {
+      font-size: 12px;
+      color: #ffaa00;
+      margin-bottom: 12px;
+      text-align: center;
+    }
+    .role-grid { display: flex; flex-direction: column; gap: 10px; width: 82%; margin-bottom: 20px; }
+    .role-btn {
+      padding: 13px;
+      border: 2px solid #444;
+      background: #202433;
+      color: #fff;
+      font-size: 14px;
+      font-weight: bold;
+      border-radius: 8px;
+      display: flex;
+      justify-content: space-between;
+      outline: none;
+    }
+    .role-btn.active { border-color: #00ffcc; background: #123838; color: #00ffcc; }
+    #startBtn {
+      width: 82%;
+      padding: 14px;
+      background: #00d2ff;
+      border: none;
+      border-radius: 8px;
+      color: #000;
+      font-size: 16px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    #stageBadge {
+      position: absolute;
+      top: 15px;
+      left: 15px;
+      font-size: 12px;
+      color: #ffaa00;
+      font-weight: bold;
+      display: none;
     }
   </style>
 </head>
 <body>
-  <div id="status">서버 연결 중...</div>
-  <canvas id="game" width="400" height="600"></canvas>
+  <div id="versionTitle">속도개선버전3 (Stage & Lobby Update)</div>
+  
+  <div id="container">
+    <div id="stageBadge">STAGE 1 / 3</div>
+    <canvas id="game" width="400" height="600"></canvas>
+
+    <div id="lobbyOverlay">
+      <h2>플레이어 위치 지정</h2>
+      <div id="connectionInfo">서버 신호 연결 대기 중...</div>
+      <div class="role-grid">
+        <button class="role-btn" id="btn-bottom" onclick="selectRole('bottom')">
+          <span>하단 (BOTTOM)</span> <span id="label-bottom">BOT</span>
+        </button>
+        <button class="role-btn" id="btn-left" onclick="selectRole('left')">
+          <span>좌측 (LEFT)</span> <span id="label-left">BOT</span>
+        </button>
+        <button class="role-btn" id="btn-right" onclick="selectRole('right')">
+          <span>우측 (RIGHT)</span> <span id="label-right">BOT</span>
+        </button>
+      </div>
+      <button id="startBtn" onclick="requestStart()">GAME START</button>
+    </div>
+  </div>
 
   <script>
     const canvas = document.getElementById("game");
     const ctx = canvas.getContext("2d");
-    const statusText = document.getElementById("status");
+    const versionTitle = document.getElementById("versionTitle");
+    const lobbyOverlay = document.getElementById("lobbyOverlay");
+    const stageBadge = document.getElementById("stageBadge");
+    const connInfo = document.getElementById("connectionInfo");
 
-    // 서버 주소 (추후 배포 주소로 갱신 예정)
-    const wsUrl = "wss://arkanoid-3p-multi.onrender.com";
-
-    const ws = new WebSocket(wsUrl);
-
+    const WS_URL = "wss://arkanoid-3p-multi.onrender.com";
+    let ws = null;
     let myRole = null;
     let bricks = [];
     let deadBrickIds = new Set();
-    let ball = { x: 200, y: 300, radius: 8 };
+    let ball = { x: 200, y: 380, radius: 8 };
     let paddles = { bottom: 200, left: 300, right: 300 };
-    let botSlots = [];
+    let botSlots = ["bottom", "left", "right"];
 
-    ws.onmessage = (event) => {
-      const msg = JSON.parse(event.data);
-      if (msg.type === "init") {
-        myRole = msg.role;
-        bricks = msg.bricks;
-        statusText.innerText = `접속 완료! 배정 포지션: [ ${myRole.toUpperCase()} ]`;
-        statusText.style.color = myRole === "bottom" ? "#00ffcc" : (myRole === "left" ? "#ff007f" : "#ffaa00");
-      } else if (msg.type === "update") {
-        ball = msg.ball;
-        paddles = msg.paddles;
-        botSlots = msg.bot_slots || [];
-        msg.bricks.forEach(id => deadBrickIds.add(id));
-        render();
-      } else if (msg.type === "full") {
-        statusText.innerText = "정원 초과 (최대 3명 이미 플레이 중)";
-      }
-    };
+    function connectSocket() {
+      connInfo.innerText = "서버 연결 시도 중 (무료 서버는 최초 30초 소요)...";
+      connInfo.style.color = "#ffaa00";
 
-    // 모바일 터치 드래그 연동
+      ws = new WebSocket(WS_URL);
+
+      ws.onopen = () => {
+        connInfo.innerText = "서버 연결 완료! 자리를 선택하세요.";
+        connInfo.style.color = "#00ffcc";
+      };
+
+      ws.onmessage = (e) => {
+        const msg = JSON.parse(e.data);
+
+        if (msg.type === "lobby_state") {
+          versionTitle.innerText = `[ ${msg.title} ]`;
+          updateLobbyUI(msg.slots);
+        } else if (msg.type === "game_start") {
+          lobbyOverlay.style.display = "none";
+          stageBadge.style.display = "block";
+          bricks = msg.bricks;
+          deadBrickIds.clear();
+        } else if (msg.type === "game_update") {
+          ball = msg.ball;
+          paddles = msg.paddles;
+          botSlots = msg.bot_slots || [];
+          stageBadge.innerText = `STAGE ${msg.stage} / 3`;
+          msg.bricks.forEach(id => deadBrickIds.add(id));
+          render();
+        }
+      };
+
+      ws.onclose = () => {
+        connInfo.innerText = "서버와 연결 끊김. 3초 후 재접속 시도...";
+        connInfo.style.color = "#ff4444";
+        setTimeout(connectSocket, 3000);
+      };
+
+      ws.onerror = () => {
+        connInfo.innerText = "서버 응답 지연 중... 잠시만 기다려주세요.";
+      };
+    }
+
+    connectSocket();
+
+    function selectRole(role) {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      myRole = role;
+      ws.send(JSON.stringify({ type: "select_role", role: role }));
+    }
+
+    function requestStart() {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      ws.send(JSON.stringify({ type: "start_game" }));
+    }
+
+    function updateLobbyUI(slots) {
+      ["bottom", "left", "right"].forEach(r => {
+        const btn = document.getElementById(`btn-${r}`);
+        const label = document.getElementById(`label-${r}`);
+        const isUser = slots[r] === "USER";
+        
+        btn.classList.toggle("active", myRole === r);
+        label.innerText = isUser ? (myRole === r ? "YOU" : "READY") : "BOT";
+        label.style.color = isUser ? "#00ffcc" : "#888";
+      });
+    }
+
     function handleTouch(e) {
-      if (!myRole) return;
+      if (!myRole || !ws || ws.readyState !== WebSocket.OPEN) return;
       const rect = canvas.getBoundingClientRect();
       const scaleX = canvas.width / rect.width;
       const scaleY = canvas.height / rect.height;
@@ -82,9 +216,7 @@
         pos = Math.max(35, Math.min(565, touchY));
       }
 
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: "move", pos: pos }));
-      }
+      ws.send(JSON.stringify({ type: "move", pos: pos }));
     }
 
     canvas.addEventListener("touchmove", handleTouch, { passive: false });
@@ -93,47 +225,39 @@
     function render() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      // 1. 상단 벽 (가이드)
-      ctx.fillStyle = "#444";
+      // 상단 가이드 벽
+      ctx.fillStyle = "#333";
       ctx.fillRect(0, 0, canvas.width, 10);
 
-      // 2. 벽돌 그리기
+      // 벽돌 렌더링
       bricks.forEach(b => {
         if (!deadBrickIds.has(b.id)) {
-          ctx.fillStyle = "#3a7bd5";
+          ctx.fillStyle = "#2c5282";
           ctx.fillRect(b.x, b.y, b.w, b.h);
-          ctx.strokeStyle = "#00d2ff";
+          ctx.strokeStyle = "#4299e1";
           ctx.strokeRect(b.x, b.y, b.w, b.h);
         }
       });
 
-      // 3. 패들 3종 그리기 (BOT 여부 라벨링)
-      // 하단 (Bottom)
-      const isBottomBot = botSlots.includes("bottom");
-      ctx.fillStyle = isBottomBot ? "#666" : "#00ffcc";
+      // 패들 렌더링
+      const isBotBottom = botSlots.includes("bottom");
+      ctx.fillStyle = isBotBottom ? "#555" : "#00ffcc";
       ctx.fillRect(paddles.bottom - 32.5, canvas.height - 20, 65, 10);
-      ctx.fillStyle = "#fff";
-      ctx.font = "10px sans-serif";
-      ctx.fillText(isBottomBot ? "BOT" : (myRole === "bottom" ? "YOU" : "P1"), paddles.bottom - 10, canvas.height - 25);
 
-      // 좌측 (Left)
-      const isLeftBot = botSlots.includes("left");
-      ctx.fillStyle = isLeftBot ? "#666" : "#ff007f";
+      const isBotLeft = botSlots.includes("left");
+      ctx.fillStyle = isBotLeft ? "#555" : "#ff007f";
       ctx.fillRect(10, paddles.left - 32.5, 10, 65);
-      ctx.fillText(isLeftBot ? "BOT" : (myRole === "left" ? "YOU" : "P2"), 25, paddles.left + 4);
 
-      // 우측 (Right)
-      const isRightBot = botSlots.includes("right");
-      ctx.fillStyle = isRightBot ? "#666" : "#ffaa00";
+      const isBotRight = botSlots.includes("right");
+      ctx.fillStyle = isBotRight ? "#555" : "#ffaa00";
       ctx.fillRect(canvas.width - 20, paddles.right - 32.5, 10, 65);
-      ctx.fillText(isRightBot ? "BOT" : (myRole === "right" ? "YOU" : "P3"), canvas.width - 45, paddles.right + 4);
 
-      // 4. 공 그리기
+      // 공 렌더링
       ctx.beginPath();
       ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
-      ctx.fillStyle = "#ffffff";
-      ctx.shadowColor = "#00ffff";
-      ctx.shadowBlur = 8;
+      ctx.fillStyle = "#fff";
+      ctx.shadowColor = "#00d2ff";
+      ctx.shadowBlur = 10;
       ctx.fill();
       ctx.shadowBlur = 0;
       ctx.closePath();
