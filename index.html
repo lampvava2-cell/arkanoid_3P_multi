@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>3인 멀티 알카노이드 (Huge Rail & Sound System)</title>
+  <title>3인 멀티 알카노이드</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -98,17 +98,17 @@
       z-index: 10;
       padding: 16px;
     }
-    h2 { margin: 0 0 12px 0; color: #fff; font-size: 18px; }
+    h2 { margin: 0 0 10px 0; color: #fff; font-size: 18px; }
     
     .name-box {
       display: flex;
       gap: 6px;
       width: 86%;
-      margin-bottom: 12px;
+      margin-bottom: 10px;
     }
     .name-box input {
       flex: 1;
-      padding: 10px;
+      padding: 9px;
       border-radius: 6px;
       border: 1px solid #445;
       background: #1d2030;
@@ -125,10 +125,38 @@
       font-weight: bold;
       font-size: 12px;
     }
+
+    /* 속도 조절 UI */
+    .speed-control-box {
+      width: 86%;
+      background: #1a1d2e;
+      border: 1px solid #334;
+      border-radius: 8px;
+      padding: 8px 12px;
+      margin-bottom: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .speed-labels {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      color: #aaa;
+    }
+    .speed-labels span strong {
+      color: #00ffcc;
+      font-size: 14px;
+    }
+    .speed-slider {
+      width: 100%;
+      accent-color: #00ffcc;
+      cursor: pointer;
+    }
     
-    .role-grid { display: flex; flex-direction: column; gap: 8px; width: 86%; margin-bottom: 14px; }
+    .role-grid { display: flex; flex-direction: column; gap: 7px; width: 86%; margin-bottom: 12px; }
     .role-btn {
-      padding: 11px 14px;
+      padding: 10px 14px;
       border: 2px solid #3e445b;
       background: #1d2030;
       color: #fff;
@@ -143,7 +171,7 @@
     .role-btn.active { border-color: #00ffcc; background: #0f3636; color: #00ffcc; }
     #startBtn {
       width: 86%;
-      padding: 13px;
+      padding: 12px;
       background: #00d2ff;
       border: none;
       border-radius: 8px;
@@ -201,7 +229,7 @@
   </style>
 </head>
 <body>
-  <div id="versionTitle">무수직반사_스코어버전11 (Huge Rail & Sound System)</div>
+  <div id="versionTitle">정통알카노이드 (포획회전 & 속도조절)</div>
   <div id="netStatus">🟡 Railway 서버 신호 연결 중...</div>
 
   <div id="scoreboard">
@@ -227,6 +255,15 @@
         <input type="text" id="nameInput" placeholder="닉네임 입력 (최대 6자)" maxlength="6">
         <button type="button" onclick="changeName()">확인</button>
       </div>
+
+      <div class="speed-control-box">
+        <div class="speed-labels">
+          <span>공 속도 설정</span>
+          <span><strong id="speedValue">6</strong> 단계 (1~10)</span>
+        </div>
+        <input type="range" min="1" max="10" value="6" id="speedSlider" class="speed-slider" oninput="changeSpeed(this.value)">
+      </div>
+
       <div class="role-grid">
         <button type="button" class="role-btn" id="btn-bottom" onclick="selectRole('bottom')">
           <span>하단 (가로)</span> <span id="label-bottom">BOT</span>
@@ -257,9 +294,6 @@
   </div>
 
   <script>
-    // ==========================================
-    // Web Audio API 기반 신디사이저 사운드 엔진
-    // ==========================================
     let audioCtx = null;
     function initAudio() {
       if (!audioCtx) {
@@ -279,7 +313,6 @@
       gain.connect(audioCtx.destination);
 
       if (type === "paddle") {
-        // 패들 반사: 맑고 통통 튀는 삼각파 비프음
         osc.type = "triangle";
         osc.frequency.setValueAtTime(320, now);
         osc.frequency.exponentialRampToValueAtTime(540, now + 0.08);
@@ -289,7 +322,6 @@
         osc.stop(now + 0.08);
       } 
       else if (type === "brick") {
-        // 벽돌 파괴: 경쾌한 아케이드 하이 피치음
         osc.type = "square";
         osc.frequency.setValueAtTime(680, now);
         osc.frequency.exponentialRampToValueAtTime(980, now + 0.09);
@@ -298,18 +330,27 @@
         osc.start(now);
         osc.stop(now + 0.09);
       } 
+      else if (type === "catch") {
+        // 공 포획 시 자석 접촉음
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(440, now);
+        osc.frequency.exponentialRampToValueAtTime(880, now + 0.12);
+        gain.gain.setValueAtTime(0.22, now);
+        gain.gain.linearRampToValueAtTime(0.01, now + 0.12);
+        osc.start(now);
+        osc.stop(now + 0.12);
+      }
       else if (type === "orb") {
-        // 마법구슬 강타: 공간을 가르는 묵직한 워프 신스음
+        // 회전 후 방출 워프음
         osc.type = "sawtooth";
-        osc.frequency.setValueAtTime(880, now);
-        osc.frequency.exponentialRampToValueAtTime(220, now + 0.22);
-        gain.gain.setValueAtTime(0.25, now);
+        osc.frequency.setValueAtTime(950, now);
+        osc.frequency.exponentialRampToValueAtTime(250, now + 0.22);
+        gain.gain.setValueAtTime(0.26, now);
         gain.gain.linearRampToValueAtTime(0.01, now + 0.22);
         osc.start(now);
         osc.stop(now + 0.22);
       } 
       else if (type === "lose") {
-        // 실점: 묵직하게 떨어지는 경고 버저음
         osc.type = "sawtooth";
         osc.frequency.setValueAtTime(220, now);
         osc.frequency.linearRampToValueAtTime(90, now + 0.25);
@@ -341,6 +382,8 @@
     const stageBadge = document.getElementById("stageBadge");
     const nameInput = document.getElementById("nameInput");
     const waitingNameInput = document.getElementById("waitingNameInput");
+    const speedSlider = document.getElementById("speedSlider");
+    const speedValue = document.getElementById("speedValue");
 
     const scoreLeft = document.getElementById("score-left");
     const scoreBottom = document.getElementById("score-bottom");
@@ -369,6 +412,13 @@
       scoreRight.innerText = `${names.right}: ${scores.right}`;
     }
 
+    function changeSpeed(val) {
+      speedValue.innerText = val;
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "set_speed", level: parseInt(val) }));
+      }
+    }
+
     function connectSocket() {
       netStatus.innerText = "🟡 Railway 연결 시도 중...";
       netStatus.style.background = "#2a2010";
@@ -392,6 +442,10 @@
           versionTitle.innerText = `[ ${msg.title} ]`;
           updateLobbyUI(msg.slots);
           if (msg.scores) updateScoreboard(msg.scores, playerNames);
+          if (msg.speed_level !== undefined) {
+            speedSlider.value = msg.speed_level;
+            speedValue.innerText = msg.speed_level;
+          }
 
           if (msg.waiting_users && msg.waiting_users.length > 0 && myRole) {
             waitingNoticeBanner.style.display = "block";
@@ -573,32 +627,30 @@
     function render() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      // 상단 가드레일
       ctx.fillStyle = "#333";
       ctx.fillRect(0, 0, canvas.width, 10);
 
-      // [패들 바로 앞까지 펼쳐진 초대형 고정 서클 레일 및 발광 마법구슬]
+      // 서클 레일 및 마법구슬
       if (orbData) {
         ctx.save();
         ctx.beginPath();
         ctx.arc(orbData.rail_cx, orbData.rail_cy, orbData.rail_r, 0, Math.PI * 2);
-        ctx.strokeStyle = "rgba(0, 255, 204, 0.22)";
-        ctx.lineWidth = 2;
+        ctx.strokeStyle = orbData.holding ? "rgba(255, 0, 234, 0.45)" : "rgba(0, 255, 204, 0.22)";
+        ctx.lineWidth = orbData.holding ? 3 : 2;
         ctx.setLineDash([8, 8]);
         ctx.stroke();
         ctx.closePath();
 
-        // 외곽 네온 글로우 마법구슬
+        // 마법구슬 본체 (포획 중일 때는 밝은 황금빛 충전 이펙트)
         ctx.beginPath();
         ctx.arc(orbData.x, orbData.y, 13, 0, Math.PI * 2);
-        ctx.fillStyle = "#ff00ea";
-        ctx.shadowColor = "#ff00ea";
-        ctx.shadowBlur = 18;
+        ctx.fillStyle = orbData.holding ? "#ffcc00" : "#ff00ea";
+        ctx.shadowColor = orbData.holding ? "#ffcc00" : "#ff00ea";
+        ctx.shadowBlur = orbData.holding ? 25 : 18;
         ctx.fill();
         ctx.shadowBlur = 0;
         ctx.closePath();
 
-        // 구슬 내부 코어
         ctx.beginPath();
         ctx.arc(orbData.x, orbData.y, 6, 0, Math.PI * 2);
         ctx.fillStyle = "#ffffff";
@@ -607,7 +659,7 @@
         ctx.restore();
       }
 
-      // 벽돌 렌더링
+      // 벽돌
       bricks.forEach(b => {
         if (!deadBrickIds.has(b.id)) {
           ctx.fillStyle = "#2c5282";
@@ -617,7 +669,7 @@
         }
       });
 
-      // 패들 렌더링
+      // 패들
       const isBotBottom = botSlots.includes("bottom");
       drawCurvedPaddle(paddles.bottom - 35, canvas.height - 20, 70, 10, isBotBottom ? "#555" : "#00ffcc", playerNames.bottom);
 
@@ -627,10 +679,10 @@
       const isBotRight = botSlots.includes("right");
       drawCurvedPaddle(canvas.width - 20, paddles.right - 35, 10, 70, isBotRight ? "#555" : "#ffaa00", playerNames.right);
 
-      // 공 렌더링
+      // 공 (구슬에 붙어 회전 중일 때는 파동 글로우)
       ctx.beginPath();
       ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
-      ctx.fillStyle = "#fff";
+      ctx.fillStyle = (orbData && orbData.holding) ? "#ffff55" : "#fff";
       ctx.shadowColor = "#00d2ff";
       ctx.shadowBlur = 10;
       ctx.fill();
