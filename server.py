@@ -10,7 +10,7 @@ import websockets
 WIDTH = 500
 HEIGHT = 500
 
-VERSION_TITLE = "무수직반사_스코어버전9 (Hot-Join & 2s Delay)"
+VERSION_TITLE = "무수직반사_스코어버전10 (Magic Orb Rail)"
 
 SLOTS = {"bottom": None, "left": None, "right": None}
 PLAYER_NAMES = {"bottom": "BOT", "left": "BOT", "right": "BOT"}
@@ -18,7 +18,7 @@ SCORES = {"bottom": 0, "left": 0, "right": 0}
 CONNECTED_CLIENTS = {}
 
 game_started = False
-pause_until = 0.0  # 일시정지 딜레이 타임스탬프
+pause_until = 0.0
 current_stage = 1
 TOTAL_STAGES = 3
 last_hitter = None
@@ -39,6 +39,16 @@ ball = {
 }
 
 bricks = []
+
+# [마법구슬 및 원형 레일 상태 변수]
+orb = {
+    "angle": 0.0,
+    "speed": 0.045,      # 회전 속도 (rad/frame)
+    "radius": 11,        # 마법구슬 크기
+    "cx": 250,
+    "cy": 230,
+    "rail_r": 135
+}
 
 def generate_stage(stage_num):
     new_bricks = []
@@ -75,7 +85,36 @@ def reset_ball():
     ball["vy"] = -abs(BALL_BASE_SPEED * math.cos(angle))
     last_hitter = None
 
+def update_rail_geometry():
+    """남은 블록들의 분포에 맞추어 원형 레일의 중심과 반지름을 동적으로 연동"""
+    global orb
+    alive_bricks = [b for b in bricks if b["alive"]]
+    if not alive_bricks:
+        return
+
+    min_x = min(b["x"] for b in alive_bricks)
+    max_x = max(b["x"] + b["w"] for b in alive_bricks)
+    min_y = min(b["y"] for b in alive_bricks)
+    max_y = max(b["y"] + b["h"] for b in alive_bricks)
+
+    cx = (min_x + max_x) / 2
+    cy = (min_y + max_y) / 2
+
+    # 중심에서 가장 먼 코너까지의 거리 + 여유 마진 18px
+    max_dist = 0
+    for b in alive_bricks:
+        for px in [b["x"], b["x"] + b["w"]]:
+            for py in [b["y"], b["y"] + b["h"]]:
+                d = math.hypot(px - cx, py - cy)
+                if d > max_dist:
+                    max_dist = d
+
+    orb["cx"] = cx
+    orb["cy"] = cy
+    orb["rail_r"] = max(45, max_dist + 18)
+
 bricks = generate_stage(current_stage)
+update_rail_geometry()
 
 def update_ai():
     ai_speed = 6.2
@@ -134,7 +173,7 @@ def enforce_non_vertical(vx, vy, base_dir="y"):
     return vx * scale, vy * scale
 
 async def game_loop():
-    global game_started, current_stage, bricks, ball, last_hitter, pause_until
+    global game_started, current_stage, bricks, ball, last_hitter, pause_until, orb
     P_LEN = 70
 
     while True:
@@ -142,6 +181,11 @@ async def game_loop():
         is_paused = (now < pause_until)
 
         if game_started:
+            # 1. 마법구슬 레일 위 궤도 회전
+            orb["angle"] = (orb["angle"] + orb["speed"]) % (2 * math.pi)
+            orb_x = orb["cx"] + orb["rail_r"] * math.cos(orb["angle"])
+            orb_y = orb["cy"] + orb["rail_r"] * math.sin(orb["angle"])
+
             if not is_paused:
                 update_ai()
 
@@ -153,7 +197,28 @@ async def game_loop():
                     ball["x"] += step_vx
                     ball["y"] += step_vy
 
-                    # 1. 천장
+                    # [핵심] 마법구슬과 공의 충돌 및 레일 내부 랜덤 토스 판정
+                    d_orb = math.hypot(ball["x"] - orb_x, ball["y"] - orb_y)
+                    if d_orb <= (ball["radius"] + orb["radius"]):
+                        # 구슬 위치에서 서클 중심을 향하는 기본 각도 계산
+                        center_dir = math.atan2(orb["cy"] - orb_y, orb["cx"] - orb_x)
+                        # 내부 방향으로 ±45도(π/4) 범위 내 랜덤 반사각 생성
+                        toss_angle = center_dir + random.uniform(-math.pi / 4, math.pi / 4)
+                        
+                        ball["vx"] = BALL_BASE_SPEED * 1.15 * math.cos(toss_angle)
+                        ball["vy"] = BALL_BASE_SPEED * 1.15 * math.sin(toss_angle)
+                        ball["vx"], ball["vy"] = enforce_non_vertical(ball["vx"], ball["vy"], "y")
+                        
+                        # 구슬 밖으로 공 밀어내기
+                        push_dist = ball["radius"] + orb["radius"] + 2.0
+                        ball["x"] = orb_x + push_dist * math.cos(toss_angle)
+                        ball["y"] = orb_y + push_dist * math.sin(toss_angle)
+
+                        step_vx = ball["vx"] / sub_steps
+                        step_vy = ball["vy"] / sub_steps
+                        break
+
+                    # 2. 천장
                     if ball["y"] - ball["radius"] <= 10:
                         ball["y"] = 10 + ball["radius"]
                         ball["vy"] = abs(ball["vy"])
@@ -161,7 +226,7 @@ async def game_loop():
                         step_vx = ball["vx"] / sub_steps
                         step_vy = ball["vy"] / sub_steps
 
-                    # 2. 하단 패들
+                    # 3. 하단 패들
                     if ball["y"] + ball["radius"] >= HEIGHT - 22:
                         pad_x = paddle_positions["bottom"]
                         if pad_x - P_LEN / 2 <= ball["x"] <= pad_x + P_LEN / 2:
@@ -182,7 +247,7 @@ async def game_loop():
                             reset_ball()
                             break
 
-                    # 3. 좌측 패들
+                    # 4. 좌측 패들
                     if ball["x"] - ball["radius"] <= 22:
                         pad_y = paddle_positions["left"]
                         if pad_y - P_LEN / 2 <= ball["y"] <= pad_y + P_LEN / 2:
@@ -204,7 +269,7 @@ async def game_loop():
                             reset_ball()
                             break
 
-                    # 4. 우측 패들
+                    # 5. 우측 패들
                     if ball["x"] + ball["radius"] >= WIDTH - 22:
                         pad_y = paddle_positions["right"]
                         if pad_y - P_LEN / 2 <= ball["y"] <= pad_y + P_LEN / 2:
@@ -226,8 +291,9 @@ async def game_loop():
                             reset_ball()
                             break
 
-                    # 5. 벽돌 충돌
+                    # 6. 벽돌 충돌
                     r = ball["radius"]
+                    hit_brick = False
                     for b in bricks:
                         if not b["alive"]:
                             continue
@@ -240,6 +306,7 @@ async def game_loop():
 
                         if (dist_x * dist_x + dist_y * dist_y) < (r * r):
                             b["alive"] = False
+                            hit_brick = True
                             if last_hitter in SCORES:
                                 SCORES[last_hitter] += 100
 
@@ -258,11 +325,15 @@ async def game_loop():
                                 ball["y"] = b["y"] - r - 0.5 if overlap_top < overlap_bottom else b["y"] + b["h"] + r + 0.5
                             break
 
+                    if hit_brick:
+                        update_rail_geometry()
+
                 if sum(1 for b in bricks if b["alive"]) == 0:
                     current_stage = (current_stage % TOTAL_STAGES) + 1
                     bricks = generate_stage(current_stage)
                     reset_ball()
-                    pause_until = time.time() + 2.0  # 다음 스테이지도 2초 준비
+                    update_rail_geometry()
+                    pause_until = time.time() + 2.0
 
             bot_list = [role for role, ws in SLOTS.items() if ws is None]
             waiting_users = [info["name"] for ws, info in CONNECTED_CLIENTS.items() if info.get("state") == "waiting"]
@@ -278,7 +349,14 @@ async def game_loop():
                 "stage": current_stage,
                 "waiting_users": waiting_users,
                 "bricks": [b["id"] for b in bricks if not b["alive"]],
-                "pause_sec": remaining_pause
+                "pause_sec": remaining_pause,
+                "orb": {
+                    "x": orb["cx"] + orb["rail_r"] * math.cos(orb["angle"]),
+                    "y": orb["cy"] + orb["rail_r"] * math.sin(orb["angle"]),
+                    "rail_cx": orb["cx"],
+                    "rail_cy": orb["cy"],
+                    "rail_r": orb["rail_r"]
+                }
             })
             for ws in list(CONNECTED_CLIENTS.keys()):
                 try:
@@ -291,24 +369,18 @@ async def game_loop():
 async def handler(websocket):
     global game_started, current_stage, bricks, SCORES, pause_until
 
-    # 기본 게스트 세팅
     new_user_name = f"플레이어{random.randint(100, 999)}"
     assigned_role = None
 
-    # [핵심 로직] 이미 게임이 진행 중일 때 접속한 경우 (핫조인)
     if game_started:
-        # 비어있는(BOT) 자리가 있는지 탐색
         empty_slots = [r for r in ["bottom", "left", "right"] if SLOTS[r] is None]
         if empty_slots:
             assigned_role = empty_slots[0]
             SLOTS[assigned_role] = websocket
             PLAYER_NAMES[assigned_role] = new_user_name
             CONNECTED_CLIENTS[websocket] = {"role": assigned_role, "name": new_user_name, "state": "playing"}
-            
-            # 모든 참여자 2초 일시정지 부여
             pause_until = time.time() + 2.0
 
-            # 신규 접속자에게 현재 게임 상태 동기화 및 즉시 시작 통보
             await websocket.send(json.dumps({
                 "type": "game_start",
                 "stage": current_stage,
@@ -316,7 +388,6 @@ async def handler(websocket):
                 "assigned_role": assigned_role
             }))
         else:
-            # 자리가 없으면 관전 대기실로
             CONNECTED_CLIENTS[websocket] = {"role": None, "name": new_user_name, "state": "waiting"}
             await websocket.send(json.dumps({
                 "type": "waiting_room_notice",
@@ -324,7 +395,6 @@ async def handler(websocket):
                 "stage": current_stage
             }))
     else:
-        # 게임 시작 전 로비 상태
         CONNECTED_CLIENTS[websocket] = {"role": None, "name": new_user_name, "state": "lobby"}
 
     await broadcast_lobby()
@@ -362,9 +432,10 @@ async def handler(websocket):
                     current_stage = 1
                     SCORES = {"bottom": 0, "left": 0, "right": 0}
                     bricks = generate_stage(current_stage)
+                    update_rail_geometry()
                     reset_ball()
                     game_started = True
-                    pause_until = time.time() + 2.0  # 게임 시작 시 2초 딜레이
+                    pause_until = time.time() + 2.0
                     
                     for ws in CONNECTED_CLIENTS:
                         CONNECTED_CLIENTS[ws]["state"] = "playing" if CONNECTED_CLIENTS[ws]["role"] else "waiting"
@@ -388,7 +459,7 @@ async def handler(websocket):
                         paddle_positions[role] = max(35, min(max_limit, float(data["pos"])))
 
             except Exception as parse_err:
-                print(f"[메시지 파싱 에러 방어]: {parse_err}")
+                print(f"[메시지 파싱 방어]: {parse_err}")
 
     except websockets.ConnectionClosed:
         pass
@@ -417,7 +488,7 @@ async def main():
         port,
         process_request=health_check_handler
     )
-    print(f"[{VERSION_TITLE}] 서버 가동 시작... 포트: {port}")
+    print(f"[{VERSION_TITLE}] 가동... 포트: {port}")
     await asyncio.gather(server.wait_closed(), game_loop())
 
 if __name__ == "__main__":
